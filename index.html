@@ -259,8 +259,8 @@ a { color: var(--blue); }
   color: #fff;
 }
 .row .body { flex: 1; min-width: 0; }
-.row .title { font-weight: 650; font-size: 16px; }
-.row .meta { font-size: 13px; color: var(--secondary); margin-top: 2px; }
+.row .title { font-weight: 650; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .meta { font-size: 13px; color: var(--secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .right { text-align: right; font-weight: 650; font-size: 16px; }
 .chev { color: var(--tertiary); flex: none; }
 
@@ -532,6 +532,114 @@ ol.steps li.done::before { background: var(--green); content: "✓"; }
 
 #sheet .row { min-height: 64px; }
 
+/* Long-list tools */
+.list-toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 0 0 10px;
+}
+.list-toolbar .search { flex: 1 1 160px; margin: 0; }
+.list-sort {
+  height: 44px; border: 0; border-radius: 12px;
+  background: var(--fill); padding: 0 12px; font-size: 15px; min-width: 140px;
+  outline: none;
+}
+.list-sort:focus { box-shadow: 0 0 0 3px var(--ring); }
+.list-summary {
+  font-size: 13px; font-weight: 600; color: var(--secondary);
+  margin: 0 4px 10px;
+}
+.show-more { width: 100%; margin: 4px 0 14px; }
+.loan-card h3, .loan-card .meta { overflow: hidden; text-overflow: ellipsis; }
+.list-card .row { content-visibility: auto; contain-intrinsic-size: auto 60px; }
+
+/* Expanded screens (unfolded foldable, iPad). Phone width stays unchanged. */
+@media (min-width: 700px) {
+  .app-header {
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+  #views {
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+  .welcome { max-width: 560px; margin: 0 auto; }
+  .top-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-items: stretch;
+    margin-bottom: 14px;
+  }
+  .top-grid .hero-grid { margin-bottom: 0; }
+  .top-grid .nw-chart { margin-bottom: 0; height: 100%; }
+  .hero { min-height: 140px; }
+  #sheet {
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    top: 50%;
+    width: min(560px, calc(100vw - 48px));
+    max-height: min(85vh, 760px);
+    border-radius: 18px;
+    transform: translate(-50%, -50%) scale(0.96);
+    opacity: 0;
+    pointer-events: none;
+    padding-bottom: 12px;
+  }
+  #sheet.on {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .fab { right: 28px; }
+}
+
+@media (min-width: 860px) {
+  .stat-row { grid-template-columns: repeat(4, 1fr); }
+  .loans-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+}
+
+/* Wide landscape: side navigation */
+@media (min-width: 1000px) and (orientation: landscape) {
+  #app { padding-left: 220px; }
+  #tabbar {
+    left: 0; right: auto; top: 0; bottom: 0;
+    width: 220px;
+    height: 100%;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 4px;
+    padding: calc(var(--safe-top) + 20px) 14px 20px;
+    border-top: 0;
+    border-right: 0.5px solid var(--sep);
+  }
+  #tabbar button {
+    flex: none;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    height: 48px;
+    padding: 0 14px;
+    border-radius: 14px;
+    font-size: 15px;
+  }
+  #tabbar button svg { width: 22px; height: 22px; }
+  #views { padding-bottom: 32px; }
+  .fab { bottom: 28px; }
+}
+
 </style>
 </head>
 <body>
@@ -590,6 +698,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     computed: null,
     sheet: null,
     hintDismissed: localStorage.getItem("pf-hint-dismissed") === "1",
+    listQuery: {},
+    listSort: {},
+    listGroup: {},
+    listShown: {},
   };
 
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -744,12 +856,48 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
   function parseSheetCells(xml, sst) {
     const cells = {};
-    const re = /<c r="([A-Z]+)(\d+)"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
-    let m;
-    while ((m = re.exec(xml))) {
-      const ref = m[1] + m[2];
-      const attrs = m[3] || "";
-      const inner = m[4] || "";
+    let i = 0;
+    const n = xml.length;
+    while (i < n) {
+      const start = xml.indexOf("<c r=\"", i);
+      if (start < 0) break;
+      let p = start + 6;
+      let col = "";
+      while (p < n) {
+        const code = xml.charCodeAt(p);
+        if (code >= 65 && code <= 90) { col += xml.charAt(p); p++; }
+        else break;
+      }
+      let row = 0;
+      while (p < n) {
+        const code = xml.charCodeAt(p);
+        if (code >= 48 && code <= 57) { row = row * 10 + (code - 48); p++; }
+        else break;
+      }
+      // Skip AA+ columns (loan amortization grid). The app only reads A–Z inputs and totals.
+      if (col.length > 1) {
+        const gt = xml.indexOf(">", p);
+        if (gt < 0) break;
+        if (xml.charAt(gt - 1) === "/") i = gt + 1;
+        else {
+          const end = xml.indexOf("</c>", gt);
+          i = end < 0 ? n : end + 4;
+        }
+        continue;
+      }
+      const tagEnd = xml.indexOf(">", p);
+      if (tagEnd < 0) break;
+      const selfClose = xml.charAt(tagEnd - 1) === "/";
+      const attrs = xml.slice(p, selfClose ? tagEnd - 1 : tagEnd);
+      let inner = "";
+      if (selfClose) i = tagEnd + 1;
+      else {
+        const end = xml.indexOf("</c>", tagEnd);
+        if (end < 0) break;
+        inner = xml.slice(tagEnd + 1, end);
+        i = end + 4;
+      }
+      const ref = col + row;
       const t = (attrs.match(/\st="([^"]*)"/) || [])[1] || "";
       const s = (attrs.match(/\ss="([^"]*)"/) || [])[1];
       const hasF = /<f[\s>]/.test(inner);
@@ -769,14 +917,15 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       } else {
         const vm = inner.match(/<v>([\s\S]*?)<\/v>/);
         if (vm && vm[1] !== "") {
-          const n = Number(vm[1]);
-          v = Number.isNaN(n) ? vm[1] : n;
+          const n2 = Number(vm[1]);
+          v = Number.isNaN(n2) ? vm[1] : n2;
         }
       }
       cells[ref] = { v: v, t: t, s: s, f: hasF };
     }
     return cells;
   }
+
   function cell(sheet, ref) {
     const c = sheet && sheet.cells && sheet.cells[ref];
     return c ? c.v : null;
@@ -845,20 +994,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const parsed = extractModel(sheets);
     parsed._sheetPaths = sheetPaths;
     parsed._unlocked = [...unlocked];
-    try {
-      if (typeof XLSX !== "undefined" && XLSX.read) {
-        const wb = XLSX.read(new Uint8Array(ab), { type: "array", raw: true, cellDates: false });
-        parsed._sheetjs = true;
-        const homeName = wb.SheetNames.find(function (n) { return n.toLowerCase() === "home"; });
-        if (homeName) {
-          const hs = wb.Sheets[homeName];
-          parsed._sjHome = {
-            A6: hs.A6 && hs.A6.v, D6: hs.D6 && hs.D6.v, G6: hs.G6 && hs.G6.v,
-            B14: hs.B14 && hs.B14.v, B15: hs.B15 && hs.B15.v, B16: hs.B16 && hs.B16.v
-          };
-        }
-      }
-    } catch (e) { parsed._sheetjs = false; }
+    parsed._raw = {};
+    Object.keys(sheets).forEach(function (nm) { parsed._raw[nm] = { cells: sheets[nm].cells }; });
     return parsed;
   }
 
@@ -1626,6 +1763,42 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       (act ? '<button class="btn cta" data-act="' + act + '"' + (attrs || "") + ">" + escapeHtml(btn) + "</button>" : "") +
       "</div>";
   }
+  function lq(key) { return (state.listQuery && state.listQuery[key]) || ""; }
+  function ls(key, fallback) { return (state.listSort && state.listSort[key]) || fallback; }
+  function lg(key) { return !!(state.listGroup && state.listGroup[key]); }
+  function lshown(key) { return (state.listShown && state.listShown[key]) || 60; }
+  function listToolbar(key, opts) {
+    opts = opts || {};
+    const q = lq(key);
+    const sort = ls(key, opts.sortDefault || "name");
+    let html = '<div class="list-toolbar">';
+    html += '<input class="search" data-role="search" data-key="' + key + '" placeholder="' +
+      escapeHtml(opts.placeholder || "Search") + '" value="' + escapeHtml(q) + '">';
+    if (opts.sorts && opts.sorts.length) {
+      html += '<select class="list-sort" data-role="list-sort" data-key="' + key + '">';
+      opts.sorts.forEach(function (s) {
+        html += '<option value="' + s.id + '"' + (sort === s.id ? " selected" : "") + ">" + escapeHtml(s.label) + "</option>";
+      });
+      html += "</select>";
+    }
+    if (opts.groupLabel) {
+      html += '<button type="button" class="pill ' + (lg(key) ? "navy" : "ghost") + '" data-act="group-toggle" data-key="' + key + '">' +
+        escapeHtml(opts.groupLabel) + "</button>";
+    }
+    html += "</div>";
+    if (opts.summary) html += '<div class="list-summary">' + opts.summary + "</div>";
+    return html;
+  }
+  function pageSlice(arr, key) {
+    const n = lshown(key);
+    return { rows: arr.slice(0, n), more: arr.length > n, hidden: Math.max(0, arr.length - n), total: arr.length };
+  }
+  function showMoreBtn(key, page) {
+    if (!page.more) return "";
+    return '<button type="button" class="btn secondary show-more" data-act="show-more" data-key="' + key +
+      '">Show more (' + page.hidden + " left)</button>";
+  }
+
 
   function render() {
     applyTheme();
@@ -1700,7 +1873,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       html += '<div class="banner red">Some Excel totals do not match the app yet. Open the saved file in Excel so formulas recalculate, then reload.</div>';
     }
     const asOf = comp.asOfISO ? fmtChartDate(comp.asOfISO) : "Not set";
-    html += '<div class="hero-grid">';
+    html += '<div class="top-grid"><div class="hero-grid">';
     if (comp.complete) {
       html += '<div class="hero navy" data-testid="nw-card"><div class="kicker">Net worth</div><div class="value" data-testid="nw-value">' +
         escapeHtml(money(comp.nw)) + '</div><button type="button" class="sub asof-link" data-act="edit-asof">As of ' +
@@ -1712,6 +1885,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }
     html += "</div>";
     html += renderNwChart(model);
+    html += "</div>";
     html += "<div class=\"stat-row\">";
     html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Accounts</div><div class="v ' + moneyClass(comp.accountsUsd) + '" data-testid="accounts-value">' + money(comp.accountsUsd) + "</div></button>";
     html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Property equity</div><div class="v ' + moneyClass(comp.equityYes) + '" data-testid="equity-value">' + money(comp.equityYes) + "</div></button>";
@@ -1746,51 +1920,106 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
   function renderLoans(model, comp) {
     let html = headerBar("Loans", "Money you have lent") + '<div id="views" class="view" data-testid="screen-loans">';
-    const active = model.loans.filter(function (l) { return l.id; });
-    if (!active.length) html += emptyState("No loans yet", "Add a loan to track money you have lent.", "add-loan", "Add a loan");
-    active.forEach(function (l) {
-      const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
-      html += '<button class="card loan-card pressable' + (r.ready ? "" : " amber-edge") + '" data-act="edit-loan" data-row="' + l.row + '" data-testid="loan-card-' + escapeHtml(l.id) + '">';
-      html += '<div class="top"><div><h3>' + escapeHtml(l.id) + "</h3><div class=\"meta muted\">" + escapeHtml(l.borrower || "") +
-        (l.purpose ? " · " + escapeHtml(l.purpose) : "") + "</div></div>";
-      html += r.ready ? '<span class="chip green">Ready</span>' : '<span class="chip amber">' + escapeHtml(r.status || "Setup") + "</span>";
-      html += '</div><div class="grid">';
-      html += '<div><div class="f">Started with</div><div class="n">' + money(l.opening) + "</div></div>";
-      html += '<div><div class="f">APR</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
-      html += '<div><div class="f">Payments</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
-      html += '<div><div class="f">Start date</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
-      html += '<div><div class="f">Received so far</div><div class="n ' + moneyClass(r.received) + '">' + money(r.received) + "</div></div>";
-      const prinTxt = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
-      const prinAttr = "";
-      html += '<div><div class="f">Amount left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
-      if (r.ready && r.unpaid > 0) html += '<div><div class="f">Unpaid interest</div><div class="n">' + money(r.unpaid) + "</div></div>";
-      html += "</div></button>";
+    let active = model.loans.filter(function (l) { return l.id; });
+    const q = lq("loans").trim().toLowerCase();
+    if (q) active = active.filter(function (l) {
+      return (l.id || "").toLowerCase().indexOf(q) >= 0 ||
+        (l.borrower || "").toLowerCase().indexOf(q) >= 0 ||
+        (l.purpose || "").toLowerCase().indexOf(q) >= 0;
     });
+    const ready = active.map(function (l) { return comp.loans.find(function (x) { return x.id === l.id; }) || {}; });
+    const totalLeft = ready.reduce(function (s, r) { return s + (r.ready && isNum(r.principal) ? Number(r.principal) : 0); }, 0);
+    html += listToolbar("loans", { placeholder: "Search loans", summary: (q ? active.length + " of " : "") + model.loans.filter(function (l) { return l.id; }).length + " loans · Amount left " + money(comp.complete ? totalLeft : null) });
+    if (!active.length) html += emptyState(q ? "No matching loans" : "No loans yet", q ? "Try a different search." : "Add a loan to track money you have lent.", q ? "" : "add-loan", q ? "" : "Add a loan");
+    else {
+      html += '<div class="loans-grid">';
+      active.forEach(function (l) {
+        const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
+        html += '<button class="card loan-card pressable' + (r.ready ? "" : " amber-edge") + '" data-act="edit-loan" data-row="' + l.row + '" data-testid="loan-card-' + escapeHtml(l.id) + '">';
+        html += '<div class="top"><div><h3>' + escapeHtml(l.id) + "</h3><div class=\"meta muted\">" + escapeHtml(l.borrower || "") +
+          (l.purpose ? " · " + escapeHtml(l.purpose) : "") + "</div></div>";
+        html += r.ready ? '<span class="chip green">Ready</span>' : '<span class="chip amber">' + escapeHtml(r.status || "Setup") + "</span>";
+        html += '</div><div class="grid">';
+        html += '<div><div class="f">Started with</div><div class="n">' + money(l.opening) + "</div></div>";
+        html += '<div><div class="f">APR</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
+        html += '<div><div class="f">Payments</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
+        html += '<div><div class="f">Start date</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
+        html += '<div><div class="f">Received so far</div><div class="n ' + moneyClass(r.received) + '">' + money(r.received) + "</div></div>";
+        const prinTxt = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
+        const prinAttr = "";
+        html += '<div><div class="f">Amount left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
+        if (r.ready && r.unpaid > 0) html += '<div><div class="f">Unpaid interest</div><div class="n">' + money(r.unpaid) + "</div></div>";
+        html += "</div></button>";
+      });
+      html += "</div>";
+    }
     const emptySlots = model.loans.filter(function (l) { return !l.id; }).length;
     html += '<p class="help-line">' + (emptySlots ? "You can add " + emptySlots + " more loan" + (emptySlots === 1 ? "" : "s") + " (25 max)." : "All 25 loan slots are in use.") + "</p></div>";
     return html;
   }
 
+
   function renderReceipts(model, comp) {
-    const q = (state.search || "").trim().toLowerCase();
-    let rows = model.receipts.slice().sort(function (a, b) {
-      const da = a.dateISO || "";
-      const db = b.dateISO || "";
-      if (da !== db) return db.localeCompare(da);
-      return b.row - a.row;
-    });
+    const q = lq("receipts").trim().toLowerCase();
+    const sort = ls("receipts", "newest");
+    let rows = model.receipts.slice();
     if (q) rows = rows.filter(function (r) {
       return (r.loanId || "").toLowerCase().indexOf(q) >= 0 ||
         (r.notes || "").toLowerCase().indexOf(q) >= 0 ||
         (r.dateISO || "").indexOf(q) >= 0 ||
         String(r.amount || "").indexOf(q) >= 0;
     });
+    rows.sort(function (a, b) {
+      if (sort === "oldest") return (a.dateISO || "").localeCompare(b.dateISO || "") || (a.row - b.row);
+      if (sort === "amount-desc") return (Number(b.amount) || 0) - (Number(a.amount) || 0);
+      if (sort === "amount-asc") return (Number(a.amount) || 0) - (Number(b.amount) || 0);
+      if (sort === "loan") return (a.loanId || "").localeCompare(b.loanId || "") || (b.dateISO || "").localeCompare(a.dateISO || "");
+      return (b.dateISO || "").localeCompare(a.dateISO || "") || (b.row - a.row);
+    });
+    const sum = rows.reduce(function (s, r) { return s + (isNum(r.amount) ? Number(r.amount) : 0); }, 0);
     let html = headerBar("Payments", "Money you have received") + '<div id="views" class="view" data-testid="screen-receipts">';
-    html += '<input class="search" data-role="search" placeholder="Search by loan, date, or note" value="' + escapeHtml(state.search || "") + '">';
-    if (!rows.length) html += emptyState("No payments yet", "Log a payment you have received.", "add-receipt", "Add a payment");
-    else {
-      html += '<div class="list-card">';
+    html += listToolbar("receipts", {
+      placeholder: "Search by loan, date, or note",
+      sortDefault: "newest",
+      sorts: [
+        { id: "newest", label: "Newest" },
+        { id: "oldest", label: "Oldest" },
+        { id: "amount-desc", label: "Amount, high to low" },
+        { id: "amount-asc", label: "Amount, low to high" },
+        { id: "loan", label: "By loan" }
+      ],
+      groupLabel: "Group by loan",
+      summary: rows.length + " payment" + (rows.length === 1 ? "" : "s") + " · " + money(sum)
+    });
+    if (!rows.length) html += emptyState(q ? "No matching payments" : "No payments yet", q ? "Try a different search." : "Log a payment you have received.", q ? "" : "add-receipt", q ? "" : "Add a payment");
+    else if (lg("receipts")) {
+      const groups = {};
       rows.forEach(function (r) {
+        const k = r.loanId || "No loan selected";
+        if (!groups[k]) groups[k] = [];
+        groups[k].push(r);
+      });
+      const keys = Object.keys(groups).sort();
+      keys.forEach(function (k) {
+        const g = groups[k];
+        const gsum = g.reduce(function (s, r) { return s + (isNum(r.amount) ? Number(r.amount) : 0); }, 0);
+        html += '<div class="section-label">' + escapeHtml(k) + " · " + g.length + " · " + money(gsum) + "</div>";
+        const page = pageSlice(g, "receipts-g-" + k);
+        html += '<div class="list-card">';
+        page.rows.forEach(function (r) {
+          const warn = isNum(r.amount) && !r.dateISO;
+          html += '<button class="row" data-act="edit-receipt" data-row="' + r.row + '"><div class="body"><div class="title">' +
+            escapeHtml(r.loanId || "No loan selected") + (warn ? ' <span class="chip amber">Date needed</span>' : "") +
+            "</div><div class=\"meta\">" + escapeHtml(r.dateISO || "No date") +
+            (r.notes ? " · " + escapeHtml(String(r.notes).slice(0, 60)) : "") +
+            "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + money(r.amount) + "</div>" + svg("chev", 18) + "</button>";
+        });
+        html += "</div>" + showMoreBtn("receipts-g-" + k, page);
+      });
+    } else {
+      const page = pageSlice(rows, "receipts");
+      html += '<div class="list-card">';
+      page.rows.forEach(function (r) {
         const warn = isNum(r.amount) && !r.dateISO;
         html += '<button class="row" data-act="edit-receipt" data-row="' + r.row + '"><div class="body"><div class="title">' +
           escapeHtml(r.loanId || "No loan selected") + (warn ? ' <span class="chip amber">Date needed</span>' : "") +
@@ -1798,41 +2027,82 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           (r.notes ? " · " + escapeHtml(String(r.notes).slice(0, 60)) : "") +
           "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + money(r.amount) + "</div>" + svg("chev", 18) + "</button>";
       });
-      html += "</div>";
+      html += "</div>" + showMoreBtn("receipts", page);
     }
     html += "</div>";
     return html;
   }
 
+
   function renderAssets(model, comp) {
+    const q = lq("assets").trim().toLowerCase();
+    const sort = ls("assets", "name");
+    function filt(list, nameFn, extra) {
+      let rows = list.slice();
+      if (q) rows = rows.filter(function (r) {
+        return nameFn(r).toLowerCase().indexOf(q) >= 0 || (extra && extra(r));
+      });
+      return rows;
+    }
+    let accounts = filt(model.accounts, function (a) { return (a.name || "") + " " + (a.type || ""); });
+    let properties = filt(model.properties, function (p) { return (p.name || "") + " " + (p.location || ""); });
+    const amt = function (r, usd) { return isNum(usd) ? Number(usd) : -Infinity; };
+    if (sort === "amount-desc" || sort === "amount-asc") {
+      const dir = sort === "amount-desc" ? -1 : 1;
+      accounts.sort(function (a, b) {
+        const ua = isNum(a.balance) ? Number(a.balance) * fxRate(model, a.currency) : 0;
+        const ub = isNum(b.balance) ? Number(b.balance) * fxRate(model, b.currency) : 0;
+        return (ua - ub) * dir;
+      });
+      properties.sort(function (a, b) {
+        const ea = isNum(a.value) ? (Number(a.value) - (a.mortgage || 0)) * fxRate(model, a.currency) : 0;
+        const eb = isNum(b.value) ? (Number(b.value) - (b.mortgage || 0)) * fxRate(model, b.currency) : 0;
+        return (ea - eb) * dir;
+      });
+    } else {
+      accounts.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+      properties.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+    }
     let html = headerBar("Assets", "Accounts & property") + '<div id="views" class="view" data-testid="screen-assets">';
-    html += '<div class="section-label">Accounts</div>';
-    if (!model.accounts.length) html += emptyState("No accounts yet", "Add a bank or cash balance.", "add-account", "Add a balance");
+    html += listToolbar("assets", {
+      placeholder: "Search accounts and property",
+      sorts: [
+        { id: "name", label: "Name" },
+        { id: "amount-desc", label: "Amount, high to low" },
+        { id: "amount-asc", label: "Amount, low to high" }
+      ],
+      summary: "Accounts " + money(comp.accountsUsd) + " · Property equity " + money(comp.equityYes)
+    });
+    html += '<div class="section-label">Accounts · ' + accounts.length + "</div>";
+    if (!accounts.length) html += emptyState(q ? "No matching accounts" : "No accounts yet", q ? "Try a different search." : "Add a bank or cash balance.", q ? "" : "add-account", q ? "" : "Add a balance");
     else {
+      const page = pageSlice(accounts, "accounts");
       html += '<div class="list-card">';
-      model.accounts.forEach(function (a) {
+      page.rows.forEach(function (a) {
         const usd = isNum(a.balance) ? Number(a.balance) * fxRate(model, a.currency) : null;
         html += '<button class="row" data-act="edit-account" data-row="' + a.row + '"><div class="body"><div class="title">' +
           escapeHtml(a.name || a.type || "Account") + '</div><div class="meta">' + escapeHtml(a.type || "") +
           (a.currency ? " · " + escapeHtml(a.currency) : "") + "</div></div><div class=\"right " + moneyClass(usd) + '">' + money(usd) + "</div>" + svg("chev", 18) + "</button>";
       });
-      html += "</div>";
+      html += "</div>" + showMoreBtn("accounts", page);
     }
-    html += '<div class="section-label">Properties</div>';
-    if (!model.properties.length) html += emptyState("No properties yet", "Add a home or other property.", "add-property", "Add a property");
+    html += '<div class="section-label">Properties · ' + properties.length + "</div>";
+    if (!properties.length) html += emptyState(q ? "No matching properties" : "No properties yet", q ? "Try a different search." : "Add a home or other property.", q ? "" : "add-property", q ? "" : "Add a property");
     else {
+      const page = pageSlice(properties, "properties");
       html += '<div class="list-card">';
-      model.properties.forEach(function (p) {
-        const eq = isNum(p.value) ? (Number(p.value) - (p.mortgage || 0)) * fxRate(model, p.currency) : null;
-        html += '<button class="row" data-act="edit-property" data-row="' + p.row + '"><div class="body"><div class="title">' +
-          escapeHtml(p.name || "Property") + '</div><div class="meta">' + (p.include ? "Included in net worth" : "Excluded from net worth") +
+      page.rows.forEach(function (pr) {
+        const eq = isNum(pr.value) ? (Number(pr.value) - (pr.mortgage || 0)) * fxRate(model, pr.currency) : null;
+        html += '<button class="row" data-act="edit-property" data-row="' + pr.row + '"><div class="body"><div class="title">' +
+          escapeHtml(pr.name || "Property") + '</div><div class="meta">' + (pr.include ? "Included in net worth" : "Excluded from net worth") +
           "</div></div><div class=\"right " + moneyClass(eq) + '">' + money(eq) + "</div>" + svg("chev", 18) + "</button>";
       });
-      html += "</div>";
+      html += "</div>" + showMoreBtn("properties", page);
     }
     html += "</div>";
     return html;
   }
+
 
   function renderMore(model, comp) {
     if (state.moreScreen === "debts") return renderDebts(model, comp);
@@ -1876,76 +2146,137 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
   function renderDebts(model, comp) {
     let html = backMore() + "<h1>Debts</h1></div><div id=\"views\" class=\"view\">";
-    if (!model.debts.length) html += emptyState("No debts yet", "Add money you owe.", "add-debt", "Add a debt");
+    const q = lq("debts").trim().toLowerCase();
+    const sort = ls("debts", "amount-desc");
+    let rows = model.debts.slice();
+    if (q) rows = rows.filter(function (d) {
+      return (d.name || "").toLowerCase().indexOf(q) >= 0 ||
+        (d.lender || "").toLowerCase().indexOf(q) >= 0 ||
+        (d.type || "").toLowerCase().indexOf(q) >= 0;
+    });
+    rows.sort(function (a, b) {
+      const ua = isNum(a.balance) ? Number(a.balance) * fxRate(model, a.currency) : 0;
+      const ub = isNum(b.balance) ? Number(b.balance) * fxRate(model, b.currency) : 0;
+      if (sort === "amount-asc") return ua - ub;
+      if (sort === "name") return (a.name || "").localeCompare(b.name || "");
+      return ub - ua;
+    });
+    html += listToolbar("debts", {
+      placeholder: "Search debts",
+      sorts: [
+        { id: "amount-desc", label: "Amount, high to low" },
+        { id: "amount-asc", label: "Amount, low to high" },
+        { id: "name", label: "Name" }
+      ],
+      summary: rows.length + " debt" + (rows.length === 1 ? "" : "s") + " · " + money(comp.debtsUsd)
+    });
+    if (!rows.length) html += emptyState(q ? "No matching debts" : "No debts yet", q ? "Try a different search." : "Add money you owe.", q ? "" : "add-debt", q ? "" : "Add a debt");
     else {
+      const page = pageSlice(rows, "debts");
       html += '<div class="list-card">';
-      model.debts.forEach(function (d) {
+      page.rows.forEach(function (d) {
         const usd = isNum(d.balance) ? Number(d.balance) * fxRate(model, d.currency) : 0;
         html += '<button class="row" data-act="edit-debt" data-row="' + d.row + '"><div class="body"><div class="title">' +
           escapeHtml(d.name || "Debt") + '</div><div class="meta">' + escapeHtml([d.type, d.lender].filter(Boolean).join(" · ")) +
           "</div></div><div class=\"right " + moneyClass(usd, true) + '">' + money(usd) + "</div>" + svg("chev", 18) + "</button>";
       });
-      html += "</div>";
+      html += "</div>" + showMoreBtn("debts", page);
     }
     html += "</div>";
-    html += '<button class="fab coral" data-act="add-debt" style="background:var(--coral)">' + svg("plus", 28) + "</button>";
     return html;
   }
+
 
   function renderCashflow(model, comp) {
     let html = backMore() + "<h1>Cash flow</h1></div><div id=\"views\" class=\"view\">";
     html += '<div class="stat-row"><div class="stat"><div class="k">Income / yr</div><div class="v ' + moneyClass(comp.incomeYr) + '">' + money(comp.incomeYr) + "</div></div>";
     html += '<div class="stat"><div class="k">Expenses / yr</div><div class="v ' + moneyClass(comp.expYr, true) + '">' + money(comp.expYr) + "</div></div></div>";
-    html += '<div class="stat"><div class="k">Open bills</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
+    html += '<div class="stat" style="margin-bottom:12px"><div class="k">Open bills</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
+    const q = lq("cashflow").trim().toLowerCase();
+    html += listToolbar("cashflow", { placeholder: "Search income, expenses, and bills" });
     [["income", "Income"], ["expenses", "Expenses"], ["bills", "Bills"]].forEach(function (pair) {
-      const list = model.cashflow[pair[0]];
-      html += '<div class="section-label">' + pair[1] + ' <button class="pill ghost" data-act="add-cf" data-list="' + pair[0] + '">Add</button></div>';
-      if (!list.length) html += emptyState("Nothing here yet", "Add an item to this list.", "add-cf", "Add one", ' data-list="' + pair[0] + '"');
+      let list = model.cashflow[pair[0]].slice();
+      if (q) list = list.filter(function (r) {
+        return (r.name || "").toLowerCase().indexOf(q) >= 0 || (r.category || "").toLowerCase().indexOf(q) >= 0;
+      });
+      html += '<div class="section-label">' + pair[1] + " · " + list.length + ' <button class="pill ghost" data-act="add-cf" data-list="' + pair[0] + '">Add</button></div>';
+      if (!list.length) html += emptyState(q ? "No matches" : "Nothing here yet", q ? "Try a different search." : "Add an item to this list.", q ? "" : "add-cf", q ? "" : "Add one", q ? "" : ' data-list="' + pair[0] + '"');
       else {
+        const page = pageSlice(list, "cf-" + pair[0]);
         html += '<div class="list-card">';
-        list.forEach(function (r) {
+        page.rows.forEach(function (r) {
           html += '<button class="row" data-act="edit-cf" data-list="' + pair[0] + '" data-row="' + r.row + '"><div class="body"><div class="title">' +
             escapeHtml(r.name || pair[1]) + '</div><div class="meta">' + escapeHtml(r.category || "") + "</div></div><div class=\"right\">" + money(r.amount) + "</div></button>";
         });
-        html += "</div>";
+        html += "</div>" + showMoreBtn("cf-" + pair[0], page);
       }
     });
     html += "</div>";
     return html;
   }
 
+
   function renderInsurance(model) {
     let html = backMore() + "<h1>Insurance</h1></div><div id=\"views\" class=\"view\">";
-    if (!model.insurance.length) html += emptyState("No policies yet", "Add an insurance policy.", "add-ins", "Add a policy");
+    const q = lq("insurance").trim().toLowerCase();
+    let rows = model.insurance.slice();
+    if (q) rows = rows.filter(function (r) {
+      return (r.type || "").toLowerCase().indexOf(q) >= 0 ||
+        (r.insurer || "").toLowerCase().indexOf(q) >= 0 ||
+        (r.policy || "").toLowerCase().indexOf(q) >= 0;
+    });
+    rows.sort(function (a, b) { return (a.type || "").localeCompare(b.type || "") || (a.insurer || "").localeCompare(b.insurer || ""); });
+    html += listToolbar("insurance", {
+      placeholder: "Search policies",
+      summary: rows.length + " polic" + (rows.length === 1 ? "y" : "ies")
+    });
+    if (!rows.length) html += emptyState(q ? "No matching policies" : "No policies yet", q ? "Try a different search." : "Add an insurance policy.", q ? "" : "add-ins", q ? "" : "Add a policy");
     else {
+      const page = pageSlice(rows, "insurance");
       html += '<div class="list-card">';
-      model.insurance.forEach(function (r) {
+      page.rows.forEach(function (r) {
         html += '<button class="row" data-act="edit-ins" data-row="' + r.row + '"><div class="body"><div class="title">' +
           escapeHtml(r.type || r.insurer || "Policy") + '</div><div class="meta">' + escapeHtml(r.insurer || "") +
           (r.renewalISO ? " · renews " + r.renewalISO : "") + "</div></div>" + svg("chev", 18) + "</button>";
       });
-      html += "</div>";
+      html += "</div>" + showMoreBtn("insurance", page);
     }
     html += '<button class="fab" data-act="add-ins">' + svg("plus", 28) + "</button></div>";
     return html;
   }
 
+
   function renderBusiness(model) {
     let html = backMore() + "<h1>Business</h1></div><div id=\"views\" class=\"view\">";
     html += '<p class="help-line" style="text-align:left">Identification numbers are not shown in this app.</p>';
-    if (!model.business.length) html += emptyState("No businesses yet", "Add a business you own or help run.", "add-biz", "Add a business");
+    const q = lq("business").trim().toLowerCase();
+    let rows = model.business.slice();
+    if (q) rows = rows.filter(function (r) {
+      return (r.name || "").toLowerCase().indexOf(q) >= 0 ||
+        (r.dba || "").toLowerCase().indexOf(q) >= 0 ||
+        (r.type || "").toLowerCase().indexOf(q) >= 0 ||
+        (r.city || "").toLowerCase().indexOf(q) >= 0;
+    });
+    rows.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+    html += listToolbar("business", {
+      placeholder: "Search businesses",
+      summary: rows.length + " entit" + (rows.length === 1 ? "y" : "ies")
+    });
+    if (!rows.length) html += emptyState(q ? "No matching businesses" : "No businesses yet", q ? "Try a different search." : "Add a business you own or help run.", q ? "" : "add-biz", q ? "" : "Add a business");
     else {
+      const page = pageSlice(rows, "business");
       html += '<div class="list-card">';
-      model.business.forEach(function (r) {
+      page.rows.forEach(function (r) {
         html += '<button class="row" data-act="edit-biz" data-row="' + r.row + '"><div class="body"><div class="title">' +
-          escapeHtml(r.name || r.dba || "Entity") + '</div><div class="meta">' + escapeHtml([r.type, r.role].filter(Boolean).join(" · ")) +
+          escapeHtml(r.name || r.dba || "Business") + '</div><div class="meta">' + escapeHtml([r.type, r.role, r.city].filter(Boolean).join(" · ")) +
           "</div></div>" + svg("chev", 18) + "</button>";
       });
-      html += "</div>";
+      html += "</div>" + showMoreBtn("business", page);
     }
     html += '<button class="fab" data-act="add-biz">' + svg("plus", 28) + "</button></div>";
     return html;
   }
+
 
   function renderHistory(model, comp) {
     const dated = model.history.filter(function (r) { return r.dateISO && (isNum(r.assets) || isNum(r.nw)); });
@@ -2596,15 +2927,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   async function loadArrayBuffer(ab, name, date, opts) {
     opts = opts || {};
     const parsed = await parseWorkbook(ab);
-    // keep raw cell styles for lock checks (not persisted)
-    const zip = await JSZip.loadAsync(ab);
-    const sstFile = zip.file("xl/sharedStrings.xml");
-    const sst = sstFile ? parseSst(await sstFile.async("string")) : [];
-    state.raw = {};
-    for (const nm of Object.keys(parsed._sheetPaths)) {
-      const xml = await zip.file(parsed._sheetPaths[nm]).async("string");
-      state.raw[nm] = { cells: parseSheetCells(xml, sst) };
-    }
+    state.raw = parsed._raw || {};
     state.parsed = parsed;
     state.sheetPaths = parsed._sheetPaths;
     state.originalAb = ab;
@@ -2707,6 +3030,20 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         case "goto-assets": state.view = "assets"; render(); break;
         case "goto-debts": state.view = "more"; state.moreScreen = "debts"; render(); break;
         case "goto-history": state.view = "more"; state.moreScreen = "history"; render(); window.scrollTo(0, 0); break;
+        case "show-more": {
+          const key = t.getAttribute("data-key") || "";
+          state.listShown = state.listShown || {};
+          state.listShown[key] = (state.listShown[key] || 60) + 60;
+          render();
+          break;
+        }
+        case "group-toggle": {
+          const key = t.getAttribute("data-key") || "";
+          state.listGroup = state.listGroup || {};
+          state.listGroup[key] = !state.listGroup[key];
+          render();
+          break;
+        }
         case "more": state.moreScreen = t.getAttribute("data-screen") || "menu"; render(); window.scrollTo(0, 0); break;
         case "theme": {
           state.theme = state.theme === "auto" ? "dark" : state.theme === "dark" ? "light" : "auto";
@@ -2733,16 +3070,30 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }
     const inp = $("#file");
     if (inp) inp.onchange = function () { onFile(inp.files && inp.files[0]); inp.value = ""; };
-    const search = document.querySelector('[data-role="search"]');
-    if (search) {
+    document.querySelectorAll('[data-role="search"]').forEach(function (search) {
       search.oninput = function () {
+        const key = search.getAttribute("data-key") || "receipts";
+        state.listQuery = state.listQuery || {};
+        state.listQuery[key] = search.value;
         state.search = search.value;
+        state.listShown = state.listShown || {};
+        state.listShown[key] = 60;
         const pos = search.selectionStart;
         render();
-        const s2 = document.querySelector('[data-role="search"]');
+        const s2 = document.querySelector('[data-role="search"][data-key="' + key + '"]');
         if (s2) { s2.focus(); try { s2.setSelectionRange(pos, pos); } catch (e) {} }
       };
-    }
+    });
+    document.querySelectorAll('[data-role="list-sort"]').forEach(function (sel) {
+      sel.onchange = function () {
+        const key = sel.getAttribute("data-key") || "";
+        state.listSort = state.listSort || {};
+        state.listSort[key] = sel.value;
+        state.listShown = state.listShown || {};
+        state.listShown[key] = 60;
+        render();
+      };
+    });
   }
 
   function openAddMenu() {

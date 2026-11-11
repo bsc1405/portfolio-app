@@ -1,5 +1,5 @@
 /* App-shell only. Never caches user workbooks or entered data (those live in IndexedDB on the device). */
-const CACHE = 'portfolio-app-v3';
+const CACHE = 'portfolio-app-v4';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
