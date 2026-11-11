@@ -47,7 +47,7 @@
   --ring: rgba(31, 58, 95, 0.18);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bot: env(safe-area-inset-bottom, 0px);
-  --tab-h: 49px;
+  --tab-h: 52px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
   color-scheme: light;
 }
@@ -108,7 +108,7 @@ a { color: var(--blue); }
 }
 
 .app-header {
-  padding: 6px 20px 10px;
+  padding: 8px 20px 12px;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -118,13 +118,14 @@ a { color: var(--blue); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 28px;
+  gap: 8px;
+  min-height: 32px;
   color: var(--secondary);
   font-size: 13px;
   font-weight: 500;
 }
 .app-header h1 {
-  margin: 4px 0 0;
+  margin: 8px 0 0;
   font-size: 34px;
   line-height: 1.1;
   letter-spacing: -0.6px;
@@ -134,7 +135,7 @@ a { color: var(--blue); }
 .app-header .actions { display: flex; gap: 8px; align-items: center; }
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 32px; padding: 0 12px; border-radius: 999px;
+  height: 36px; padding: 0 14px; border-radius: 999px;
   font-size: 13px; font-weight: 600;
   background: var(--fill); color: var(--label);
   transition: transform 0.12s ease, opacity 0.12s ease, background 0.12s;
@@ -155,7 +156,7 @@ a { color: var(--blue); }
 
 #views {
   flex: 1;
-  padding: 0 16px calc(var(--tab-h) + var(--safe-bot) + 24px);
+  padding: 0 16px calc(var(--tab-h) + var(--safe-bot) + 88px);
 }
 
 .view { animation: fadeup 0.28s ease; }
@@ -194,8 +195,9 @@ a { color: var(--blue); }
   text-transform: uppercase; opacity: 0.82;
 }
 .hero .value {
-  font-size: 32px; font-weight: 700; letter-spacing: -0.8px;
+  font-size: 34px; font-weight: 700; letter-spacing: -0.8px;
   margin-top: 8px; line-height: 1.1; word-break: break-word;
+  font-variant-numeric: tabular-nums;
 }
 .hero .sub { margin-top: 8px; font-size: 13px; opacity: 0.85; }
 .hero.navy { background: linear-gradient(160deg, #2F5D8C, #1F3A5F 55%, #15283F); }
@@ -211,12 +213,17 @@ a { color: var(--blue); }
 
 .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
 .stat {
-  background: var(--bg-elev); border-radius: 18px; padding: 14px;
+  background: var(--bg-elev); border-radius: 18px; padding: 16px 14px 14px;
   box-shadow: var(--shadow-sm);
+  min-height: 88px;
 }
+.stat.pressable { transition: transform 0.12s ease; }
+.stat.pressable:active { transform: scale(0.985); }
 .stat .k { font-size: 12px; color: var(--secondary); font-weight: 600; }
-.stat .v { font-size: 20px; font-weight: 700; letter-spacing: -0.4px; margin-top: 6px; }
+.stat .v { font-size: 20px; font-weight: 700; letter-spacing: -0.4px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.stat .meta { font-size: 11px; color: var(--secondary); margin-top: 4px; font-weight: 500; }
 
+.money, .hero .value, .right, .loan-card .n { font-variant-numeric: tabular-nums; }
 .money.pos { color: var(--pos); }
 .money.neg, .money.debt { color: var(--red); }
 .money.zero { color: var(--label); }
@@ -239,7 +246,7 @@ a { color: var(--blue); }
 .list-card { background: var(--bg-elev); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-sm); margin-bottom: 12px; }
 .row {
   display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px; min-height: 52px;
+  padding: 14px 16px; min-height: 60px;
   border-bottom: 0.5px solid var(--sep);
   text-align: left; width: 100%; background: transparent; color: inherit;
   transition: background 0.12s;
@@ -268,15 +275,16 @@ a { color: var(--blue); }
 .empty {
   text-align: center; padding: 36px 20px; color: var(--secondary);
 }
-.empty p { margin: 8px 0 0; font-size: 14px; line-height: 1.4; }
+.empty p { margin: 8px 0 0; font-size: 15px; line-height: 1.45; }
 .empty h3 { margin: 0; color: var(--label); font-size: 18px; }
+.empty .btn { margin: 18px auto 0; max-width: 240px; }
 
 .welcome {
-  padding: 24px 8px 40px;
+  padding: 24px 16px 40px;
   text-align: center;
 }
 .welcome .mark {
-  width: 84px; height: 84px; margin: 24px auto 18px;
+  width: 88px; height: 88px; margin: 36px auto 18px;
   border-radius: 22px; box-shadow: var(--shadow);
 }
 .welcome h2 { font-size: 28px; letter-spacing: -0.5px; margin: 0 0 8px; }
@@ -289,9 +297,9 @@ a { color: var(--blue); }
 }
 
 .search {
-  width: 100%; height: 36px; border: 0; border-radius: 10px;
-  background: var(--fill); padding: 0 12px; margin: 0 0 12px;
-  outline: none;
+  width: 100%; height: 44px; border: 0; border-radius: 12px;
+  background: var(--fill); padding: 0 14px; margin: 0 0 14px;
+  outline: none; font-size: 16px;
 }
 .search:focus { box-shadow: 0 0 0 3px var(--ring); }
 
@@ -370,7 +378,7 @@ a { color: var(--blue); }
 .field label { display: block; font-size: 12px; font-weight: 600; color: var(--secondary); margin: 0 0 6px; }
 .field input, .field select, .field textarea {
   width: 100%; border: 0; background: var(--fill); border-radius: 12px;
-  padding: 12px 12px; outline: none; font-size: 17px;
+  padding: 14px 14px; outline: none; font-size: 17px; min-height: 50px;
 }
 .field textarea { min-height: 72px; resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus { box-shadow: 0 0 0 3px var(--ring); }
@@ -389,8 +397,8 @@ a { color: var(--blue); }
 
 .pending-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  background: var(--bg-elev); border-radius: 14px; padding: 10px 12px; margin-bottom: 12px;
-  box-shadow: var(--shadow-sm); font-size: 13px;
+  background: var(--bg-elev); border-radius: 16px; padding: 12px 14px; margin-bottom: 12px;
+  box-shadow: var(--shadow-sm); font-size: 14px; font-weight: 600;
 }
 
 .chart { width: 100%; height: 160px; }
@@ -401,7 +409,13 @@ a { color: var(--blue); }
 .split { display: flex; gap: 8px; }
 .split .field { flex: 1; }
 
-.file-meta { font-size: 12px; color: var(--secondary); }
+.file-meta {
+  flex: 1; min-width: 0;
+  font-size: 12px; color: var(--secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-header .actions { flex: none; }
+
 
 kbd { font: inherit; }
 
@@ -415,6 +429,108 @@ button.row { display: flex; }
 .loan-card.amber-edge { border-top-color: var(--gold); }
 .stat .v.status-txt { font-size: 15px; color: var(--amber-fg); }
 .pill { white-space: nowrap; }
+
+/* Net-worth trend chart (Home + History) */
+.chart, svg.trend { --chart-stroke: var(--teal); }
+.nw-chart {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elev);
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
+  padding: 16px 16px 12px;
+  margin: 0 0 12px;
+  color: inherit;
+  --chart-stroke: var(--teal);
+  transition: transform 0.12s ease;
+}
+.nw-chart:active { transform: scale(0.985); }
+.nw-chart.down { --chart-stroke: var(--coral); }
+.nw-chart.flat { --chart-stroke: var(--secondary); }
+.nw-chart .chart-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+}
+.nw-chart .chart-kicker {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--secondary);
+}
+.nw-chart .chart-latest { font-size: 20px; font-weight: 700; letter-spacing: -0.4px; line-height: 1.1; }
+.nw-chart .chart-change { margin-top: 6px; font-size: 13px; font-weight: 650; color: var(--secondary); }
+.nw-chart .chart-change.up { color: var(--pos); }
+.nw-chart .chart-change.down { color: var(--red); }
+.nw-chart .chart-empty {
+  padding: 16px 2px 6px; color: var(--secondary);
+  font-size: 15px; line-height: 1.4; font-weight: 500;
+}
+.nw-chart svg.trend { width: 100%; height: 148px; display: block; margin-top: 10px; }
+.nw-chart .chart-axis {
+  display: flex; justify-content: space-between; margin-top: 2px;
+  font-size: 11px; color: var(--secondary); font-weight: 600;
+}
+:root[data-theme="dark"] .nw-chart:not(.down):not(.flat) { --chart-stroke: #3ECFAF; }
+:root[data-theme="dark"] .nw-chart.down { --chart-stroke: #FF8A7A; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .nw-chart:not(.down):not(.flat) { --chart-stroke: #3ECFAF; }
+  :root:not([data-theme="light"]) .nw-chart.down { --chart-stroke: #FF8A7A; }
+}
+
+/* First-run hint + steps */
+.hint-card {
+  text-align: left;
+  background: var(--bg-elev);
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
+  padding: 16px 16px 14px;
+  margin: 0 0 14px;
+}
+.hint-card .hint-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 4px;
+}
+ol.steps {
+  list-style: none; margin: 10px 0 0; padding: 0; counter-reset: step;
+}
+ol.steps li {
+  position: relative;
+  counter-increment: step;
+  padding: 9px 0 9px 36px;
+  font-size: 15px; font-weight: 600; color: var(--label);
+  border-bottom: 0.5px solid var(--sep);
+}
+ol.steps li:last-child { border-bottom: 0; padding-bottom: 2px; }
+ol.steps li::before {
+  content: counter(step);
+  position: absolute; left: 0; top: 8px;
+  width: 24px; height: 24px; border-radius: 99px;
+  background: var(--navy); color: #fff;
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 24px; text-align: center;
+}
+ol.steps li.done { color: var(--secondary); }
+ol.steps li.done::before { background: var(--green); content: "✓"; }
+.welcome-steps { margin: 22px 0 8px; }
+
+.hero .asof-link {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 13px;
+  opacity: 0.9;
+  font-weight: 600;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.hero .asof-link:active { opacity: 0.7; }
+
+.pill.save-idle { color: var(--navy); }
+:root[data-theme="dark"] .pill.save-idle { color: #7EB0FF; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pill.save-idle { color: #7EB0FF; }
+}
+
+#sheet .row { min-height: 64px; }
 
 </style>
 </head>
@@ -455,7 +571,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
   const EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
-  const STATUS_INCOMPLETE = "Setup / receipts incomplete";
+  const STATUS_INCOMPLETE = "Setup needed";
   const STATUS_DATE = "Date needed";
 
   const state = {
@@ -473,6 +589,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     mismatch: [],
     computed: null,
     sheet: null,
+    hintDismissed: localStorage.getItem("pf-hint-dismissed") === "1",
   };
 
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -1478,14 +1595,36 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     state.sheet = null;
   }
 
-  function headerBar(title, subtitle) {
+  function headerActions() {
     const pending = state.pending.length;
-    return '<div class="app-header"><div class="top-row"><span class="file-meta">' +
-      escapeHtml(subtitle || "") + '</span><div class="actions">' +
+    return '<div class="actions">' +
       (pending ? '<button class="pill ghost" data-act="undo">' + svg("undo", 16) + " Undo</button>" : "") +
-      (pending ? '<button class="pill navy" data-act="save" data-testid="save-excel">' + svg("share", 16) + " Save Excel" +
-        (pending ? ' <span class="dot-badge">' + pending + "</span>" : "") + "</button>" : "") +
-      "</div></div><h1>" + escapeHtml(title) + "</h1></div>";
+      '<button class="pill ' + (pending ? "navy" : "ghost save-idle") + '" data-act="save" data-testid="save-excel">' +
+      svg("share", 16) + " Save Excel" +
+      (pending ? ' <span class="dot-badge">' + pending + "</span>" : "") + "</button></div>";
+  }
+  function headerBar(title, subtitle) {
+    return '<div class="app-header"><div class="top-row"><span class="file-meta">' +
+      escapeHtml(subtitle || "") + "</span>" + headerActions() +
+      "</div><h1>" + escapeHtml(title) + "</h1></div>";
+  }
+  function firstRunHint(opened) {
+    if (state.hintDismissed) return "";
+    return '<div class="hint-card" data-testid="first-run-hint">' +
+      '<div class="hint-top"><div class="chart-kicker">How this works</div>' +
+      '<button class="pill ghost" data-act="dismiss-hint" data-testid="dismiss-hint">Got it</button></div>' +
+      '<ol class="steps">' +
+      '<li' + (opened ? ' class="done"' : "") + ">Open Excel file</li>" +
+      "<li>Add entries</li>" +
+      "<li>Save Excel</li>" +
+      "<li>Replace in Files</li>" +
+      "</ol></div>";
+  }
+  function emptyState(title, body, act, btn, attrs) {
+    return '<div class="empty"><h3>' + escapeHtml(title) + "</h3>" +
+      (body ? "<p>" + escapeHtml(body) + "</p>" : "") +
+      (act ? '<button class="btn cta" data-act="' + act + '"' + (attrs || "") + ">" + escapeHtml(btn) + "</button>" : "") +
+      "</div>";
   }
 
   function render() {
@@ -1515,9 +1654,13 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     return '<div class="welcome" data-testid="welcome">' +
       '<img class="mark" src="icon-180.png" alt="">' +
       "<h2>Portfolio</h2>" +
-      "<p>Open your workbook from the Files app. Everything stays on this iPhone — nothing is uploaded or signed in.</p>" +
+      "<p>Your numbers stay on this iPhone. Nothing is uploaded, and there is no sign-in.</p>" +
       '<button class="btn cta" data-act="open" data-testid="open-file">Open Excel file</button>' +
-      '<p class="help-line">Works with Portfolio-Mobile.xlsx or Portfolio-Soft-Banking-Interest.xlsx. Add payments and balances here, then Save updated Excel and open it in Excel so formulas recalculate.</p>' +
+      '<div class="hint-card welcome-steps">' +
+      '<div class="chart-kicker">How this works</div>' +
+      "<ol class=\"steps\"><li>Open Excel file</li><li>Add entries</li><li>Save Excel</li><li>Replace in Files</li></ol>" +
+      "</div>" +
+      '<p class="help-line">Works with your Portfolio workbook. After you save, open the file in Excel so formulas recalculate.</p>' +
       '<input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>' +
       "</div>";
   }
@@ -1526,7 +1669,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const tabs = [
       { id: "home", label: "Home", icon: "home" },
       { id: "loans", label: "Loans", icon: "loans" },
-      { id: "receipts", label: "Receipts", icon: "receipts" },
+      { id: "receipts", label: "Payments", icon: "receipts" },
       { id: "assets", label: "Assets", icon: "assets" },
       { id: "more", label: "More", icon: "more" }
     ];
@@ -1537,74 +1680,74 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
 
   function fabFor(view) {
-    if (view === "home") return "";
-    const map = { loans: ["add-loan", "navy"], receipts: ["add-receipt", "gold"], assets: ["add-asset", "teal"], more: ["", ""] };
-    const x = map[view];
-    if (!x || !x[0]) return "";
-    return '<button class="fab ' + x[1] + '" data-act="' + x[0] + '" data-testid="fab">' + svg("plus", 28) + "</button>";
+    if (view === "more" && state.moreScreen !== "menu") return "";
+    return '<button class="fab navy" data-act="add-menu" data-testid="fab" aria-label="Add">' + svg("plus", 28) + "</button>";
   }
 
   function renderHome(model, comp) {
     const sub = (state.fileName || "Workbook") + (state.fileDate ? " · " + fmtFileDate(state.fileDate) : "");
     let html = headerBar("Portfolio", sub) + '<div id="views" class="view" data-testid="screen-home">';
-    html += '<p class="help-line" style="text-align:left;margin:0 4px 12px">Enter figures here. Saving writes only unlocked input cells. Open the file in Excel to recalculate locked formulas.</p>';
+    html += firstRunHint(true);
     if (state.pending.length) {
       html += '<div class="pending-bar"><span>' + state.pending.length + " unsaved change" + (state.pending.length > 1 ? "s" : "") +
         "</span><button class=\"pill navy\" data-act=\"save\">Save Excel</button></div>";
     }
     if (!comp.complete) {
       html += '<div class="banner amber" data-testid="status-banner"><span class="title">' + escapeHtml(STATUS_INCOMPLETE) +
-        "</span>A loan is missing terms or a receipt needs a date. Net worth is hidden until setup is complete — just like Excel.</div>";
+        "</span>A loan is missing details, or a payment has no date. Net worth shows once that is fixed, just like Excel.</div>";
     }
     if (state.mismatch && state.mismatch.length && !state.pending.length) {
-      html += '<div class="banner red">Cached Excel values differ from the app calculation: ' +
-        escapeHtml(state.mismatch.slice(0, 3).join("; ")) + "</div>";
+      html += '<div class="banner red">Some Excel totals do not match the app yet. Open the saved file in Excel so formulas recalculate, then reload.</div>';
     }
+    const asOf = comp.asOfISO ? fmtChartDate(comp.asOfISO) : "Not set";
     html += '<div class="hero-grid">';
     if (comp.complete) {
       html += '<div class="hero navy" data-testid="nw-card"><div class="kicker">Net worth</div><div class="value" data-testid="nw-value">' +
-        escapeHtml(money(comp.nw)) + '</div><div class="sub">As of ' + escapeHtml(comp.asOfISO || "—") + "</div></div>";
+        escapeHtml(money(comp.nw)) + '</div><button type="button" class="sub asof-link" data-act="edit-asof">As of ' +
+        escapeHtml(asOf) + "</button></div>";
     } else {
       html += '<div class="hero status" data-testid="nw-card"><div class="kicker">Net worth</div><div class="value" data-testid="nw-value">' +
-        escapeHtml(STATUS_INCOMPLETE) + '</div><div class="sub">As of ' + escapeHtml(comp.asOfISO || "—") + " · tap Loans to finish setup</div></div>";
+        escapeHtml(STATUS_INCOMPLETE) + '</div><button type="button" class="sub asof-link" data-act="edit-asof">As of ' +
+        escapeHtml(asOf) + " · Open Loans to finish</button></div>";
     }
-    html += "</div><div class=\"stat-row\">";
+    html += "</div>";
+    html += renderNwChart(model);
+    html += "<div class=\"stat-row\">";
     html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Accounts</div><div class="v ' + moneyClass(comp.accountsUsd) + '" data-testid="accounts-value">' + money(comp.accountsUsd) + "</div></button>";
     html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Property equity</div><div class="v ' + moneyClass(comp.equityYes) + '" data-testid="equity-value">' + money(comp.equityYes) + "</div></button>";
-    html += '<button class="stat pressable" data-tab="loans"><div class="k">Receivables</div><div class="v ' + (comp.complete ? moneyClass(comp.recvPrin) : "status-txt") + '" data-testid="recv-value">' +
-      (comp.complete ? money(comp.recvPrin) : "Needs info") + "</div></button>";
+    html += '<button class="stat pressable" data-tab="loans"><div class="k">Money lent</div><div class="v ' + (comp.complete ? moneyClass(comp.recvPrin) : "status-txt") + '" data-testid="recv-value">' +
+      (comp.complete ? money(comp.recvPrin) : "Setup needed") + "</div></button>";
     html += '<button class="stat pressable" data-act="goto-debts"><div class="k">Debts</div><div class="v ' + moneyClass(comp.debtsUsd, true) + '" data-testid="debts-value">' + money(comp.debtsUsd) + "</div></button>";
     html += "</div>";
     if (comp.complete) {
       html += '<div class="stat-row"><div class="stat"><div class="k">Total assets</div><div class="v ' + moneyClass(comp.assets) + '">' + money(comp.assets) + "</div></div>";
-      html += '<div class="stat"><div class="k">Unpaid interest (not in NW)</div><div class="v">' + money(comp.unpaid) + "</div></div></div>";
+      html += '<div class="stat"><div class="k">Unpaid interest</div><div class="v">' + money(comp.unpaid) + '</div><div class="meta">Not included in net worth</div></div></div>';
     }
-    html += '<div class="section-label">Loans</div><div class="list-card">';
+    html += '<div class="section-label">Loans</div>';
     const active = model.loans.filter(function (l) { return l.id; });
-    if (!active.length) html += '<div class="empty"><h3>Nothing entered yet</h3><p>Add a loan to get started.</p></div>';
-    active.forEach(function (l, i) {
-      const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
-      const right = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
-      const cls = r.ready ? moneyClass(r.principal) : "";
-      html += '<button class="row" data-act="edit-loan" data-row="' + l.row + '"><div class="icon-bubble" style="background:' + (r.ready ? "var(--green)" : "var(--gold)") + '">' + svg("loans", 18) + "</div>" +
-        '<div class="body"><div class="title">' + escapeHtml(l.id) + (l.borrower && l.borrower !== l.id ? " · " + escapeHtml(l.borrower) : "") + "</div>" +
-        '<div class="meta">' + (r.ready ? "Principal left" : escapeHtml((r.issues || []).slice(0, 2).join(" · "))) + "</div></div>" +
-        '<div class="right ' + cls + '">' + right + "</div>" + svg("chev", 18) + "</button>";
-    });
+    if (!active.length) html += emptyState("No loans yet", "Add a loan to track money you have lent.", "add-loan", "Add a loan");
+    else {
+      html += '<div class="list-card">';
+      active.forEach(function (l) {
+        const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
+        const right = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
+        const cls = r.ready ? moneyClass(r.principal) : "";
+        html += '<button class="row" data-act="edit-loan" data-row="' + l.row + '"><div class="icon-bubble" style="background:' + (r.ready ? "var(--green)" : "var(--gold)") + '">' + svg("loans", 18) + "</div>" +
+          '<div class="body"><div class="title">' + escapeHtml(l.id) + (l.borrower && l.borrower !== l.id ? " · " + escapeHtml(l.borrower) : "") + "</div>" +
+          '<div class="meta">' + (r.ready ? "Amount left" : escapeHtml((r.issues || []).slice(0, 2).join(" · "))) + "</div></div>" +
+          '<div class="right ' + cls + '">' + right + "</div>" + svg("chev", 18) + "</button>";
+      });
+      html += "</div>";
+    }
     html += "</div>";
-    html += '<div class="section-label">Quick actions</div><div class="list-card">';
-    html += '<button class="row" data-act="add-receipt">' + svg("plus", 18) + '<div class="body"><div class="title">Add payment received</div><div class="meta">Goes into the receipt log</div></div>' + svg("chev", 18) + "</button>";
-    html += '<button class="row" data-act="edit-asof"><div class="body"><div class="title">As-of date</div><div class="meta">' + escapeHtml(comp.asOfISO || "Not set") + "</div></div>" + svg("chev", 18) + "</button>";
-    html += '<button class="row" data-act="open"><div class="body"><div class="title">Refresh from file</div><div class="meta">Replace the loaded workbook</div></div>' + svg("chev", 18) + "</button>";
-    html += "</div></div>";
     html += '<input type="file" id="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>';
     return html;
   }
 
   function renderLoans(model, comp) {
-    let html = headerBar("Loans", "Receivables") + '<div id="views" class="view" data-testid="screen-loans">';
+    let html = headerBar("Loans", "Money you have lent") + '<div id="views" class="view" data-testid="screen-loans">';
     const active = model.loans.filter(function (l) { return l.id; });
-    if (!active.length) html += '<div class="empty"><h3>Nothing entered yet</h3><p>Tap + to add a loan.</p></div>';
+    if (!active.length) html += emptyState("No loans yet", "Add a loan to track money you have lent.", "add-loan", "Add a loan");
     active.forEach(function (l) {
       const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
       html += '<button class="card loan-card pressable' + (r.ready ? "" : " amber-edge") + '" data-act="edit-loan" data-row="' + l.row + '" data-testid="loan-card-' + escapeHtml(l.id) + '">';
@@ -1612,19 +1755,19 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         (l.purpose ? " · " + escapeHtml(l.purpose) : "") + "</div></div>";
       html += r.ready ? '<span class="chip green">Ready</span>' : '<span class="chip amber">' + escapeHtml(r.status || "Setup") + "</span>";
       html += '</div><div class="grid">';
-      html += '<div><div class="f">Opening</div><div class="n">' + money(l.opening) + "</div></div>";
+      html += '<div><div class="f">Started with</div><div class="n">' + money(l.opening) + "</div></div>";
       html += '<div><div class="f">APR</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
       html += '<div><div class="f">Payments</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
-      html += '<div><div class="f">Start</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
-      html += '<div><div class="f">Received</div><div class="n ' + moneyClass(r.received) + '">' + money(r.received) + "</div></div>";
+      html += '<div><div class="f">Start date</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
+      html += '<div><div class="f">Received so far</div><div class="n ' + moneyClass(r.received) + '">' + money(r.received) + "</div></div>";
       const prinTxt = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
       const prinAttr = "";
-      html += '<div><div class="f">Principal left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
+      html += '<div><div class="f">Amount left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
       if (r.ready && r.unpaid > 0) html += '<div><div class="f">Unpaid interest</div><div class="n">' + money(r.unpaid) + "</div></div>";
       html += "</div></button>";
     });
     const emptySlots = model.loans.filter(function (l) { return !l.id; }).length;
-    html += '<p class="help-line">' + emptySlots + " empty loan slots remain (25 max).</p></div>";
+    html += '<p class="help-line">' + (emptySlots ? "You can add " + emptySlots + " more loan" + (emptySlots === 1 ? "" : "s") + " (25 max)." : "All 25 loan slots are in use.") + "</p></div>";
     return html;
   }
 
@@ -1642,15 +1785,15 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         (r.dateISO || "").indexOf(q) >= 0 ||
         String(r.amount || "").indexOf(q) >= 0;
     });
-    let html = headerBar("Receipts", "Payment log") + '<div id="views" class="view" data-testid="screen-receipts">';
-    html += '<input class="search" data-role="search" placeholder="Search loan, date, note" value="' + escapeHtml(state.search || "") + '">';
-    if (!rows.length) html += '<div class="empty"><h3>Nothing entered yet</h3><p>Tap + to log a payment received.</p></div>';
+    let html = headerBar("Payments", "Money you have received") + '<div id="views" class="view" data-testid="screen-receipts">';
+    html += '<input class="search" data-role="search" placeholder="Search by loan, date, or note" value="' + escapeHtml(state.search || "") + '">';
+    if (!rows.length) html += emptyState("No payments yet", "Log a payment you have received.", "add-receipt", "Add a payment");
     else {
       html += '<div class="list-card">';
       rows.forEach(function (r) {
         const warn = isNum(r.amount) && !r.dateISO;
         html += '<button class="row" data-act="edit-receipt" data-row="' + r.row + '"><div class="body"><div class="title">' +
-          escapeHtml(r.loanId || "(no loan)") + (warn ? ' <span class="chip amber">Date needed</span>' : "") +
+          escapeHtml(r.loanId || "No loan selected") + (warn ? ' <span class="chip amber">Date needed</span>' : "") +
           "</div><div class=\"meta\">" + escapeHtml(r.dateISO || "No date") +
           (r.notes ? " · " + escapeHtml(String(r.notes).slice(0, 60)) : "") +
           "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + money(r.amount) + "</div>" + svg("chev", 18) + "</button>";
@@ -1664,7 +1807,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function renderAssets(model, comp) {
     let html = headerBar("Assets", "Accounts & property") + '<div id="views" class="view" data-testid="screen-assets">';
     html += '<div class="section-label">Accounts</div>';
-    if (!model.accounts.length) html += '<div class="card empty"><h3>Nothing entered yet</h3></div>';
+    if (!model.accounts.length) html += emptyState("No accounts yet", "Add a bank or cash balance.", "add-account", "Add a balance");
     else {
       html += '<div class="list-card">';
       model.accounts.forEach(function (a) {
@@ -1676,7 +1819,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       html += "</div>";
     }
     html += '<div class="section-label">Properties</div>';
-    if (!model.properties.length) html += '<div class="card empty"><h3>Nothing entered yet</h3></div>';
+    if (!model.properties.length) html += emptyState("No properties yet", "Add a home or other property.", "add-property", "Add a property");
     else {
       html += '<div class="list-card">';
       model.properties.forEach(function (p) {
@@ -1702,11 +1845,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     let html = headerBar("More", "Menu") + '<div id="views" class="view" data-testid="screen-menu">';
     const items = [
       ["debts", "Debts", "Money you owe", money(comp.debtsUsd)],
-      ["cashflow", "Cashflow", "Income, expenses, bills", ""],
+      ["cashflow", "Cash flow", "Income, expenses, and bills", ""],
       ["insurance", "Insurance", "Policies", model.insurance.length ? String(model.insurance.length) : ""],
       ["business", "Business", "Entities (IDs stay private)", model.business.length ? String(model.business.length) : ""],
-      ["history", "History", "Net-worth snapshots", ""],
-      ["fx", "FX", "Currency rates", ""],
+      ["history", "History", "Net worth over time", ""],
+      ["fx", "Currencies", "Exchange rates", ""],
       ["guide", "Guide", "How this app works", ""]
     ];
     html += '<div class="list-card">';
@@ -1716,9 +1859,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     });
     html += "</div>";
     html += '<div class="section-label">File</div><div class="list-card">';
-    html += '<button class="row" data-act="open"><div class="body"><div class="title">Open / refresh Excel file</div><div class="meta">' +
+    html += '<button class="row" data-act="open"><div class="body"><div class="title">Open Excel file</div><div class="meta">' +
       escapeHtml(state.fileName || "") + "</div></div>" + svg("chev", 18) + "</button>";
-    html += '<button class="row" data-act="save"><div class="body"><div class="title">Save updated Excel</div><div class="meta">Share or download a new .xlsx</div></div>' + svg("chev", 18) + "</button>";
+    html += '<button class="row" data-act="save"><div class="body"><div class="title">Save Excel</div><div class="meta">Then Replace the file in Files</div></div>' + svg("chev", 18) + "</button>";
     html += '<div class="row"><div class="body"><div class="title">Appearance</div></div>' +
       '<button class="pill ghost" data-act="theme">' + (state.theme === "auto" ? "Auto" : state.theme === "dark" ? "Dark" : "Light") + "</button></div>";
     html += '</div><p class="help-line">Private on-device app. Your workbook never leaves this phone unless you share the exported file.</p></div>';
@@ -1727,12 +1870,13 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
 
   function backMore() {
-    return '<div class="app-header"><div class="top-row"><button class="pill ghost" data-act="more" data-screen="menu">‹ More</button></div>';
+    return '<div class="app-header"><div class="top-row"><button class="pill ghost" data-act="more" data-screen="menu">‹ More</button>' +
+      headerActions() + "</div>";
   }
 
   function renderDebts(model, comp) {
     let html = backMore() + "<h1>Debts</h1></div><div id=\"views\" class=\"view\">";
-    if (!model.debts.length) html += '<div class="empty"><h3>Nothing entered yet</h3><p>Tap + to add a debt.</p></div>';
+    if (!model.debts.length) html += emptyState("No debts yet", "Add money you owe.", "add-debt", "Add a debt");
     else {
       html += '<div class="list-card">';
       model.debts.forEach(function (d) {
@@ -1749,14 +1893,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
 
   function renderCashflow(model, comp) {
-    let html = backMore() + "<h1>Cashflow</h1></div><div id=\"views\" class=\"view\">";
+    let html = backMore() + "<h1>Cash flow</h1></div><div id=\"views\" class=\"view\">";
     html += '<div class="stat-row"><div class="stat"><div class="k">Income / yr</div><div class="v ' + moneyClass(comp.incomeYr) + '">' + money(comp.incomeYr) + "</div></div>";
     html += '<div class="stat"><div class="k">Expenses / yr</div><div class="v ' + moneyClass(comp.expYr, true) + '">' + money(comp.expYr) + "</div></div></div>";
     html += '<div class="stat"><div class="k">Open bills</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
     [["income", "Income"], ["expenses", "Expenses"], ["bills", "Bills"]].forEach(function (pair) {
       const list = model.cashflow[pair[0]];
       html += '<div class="section-label">' + pair[1] + ' <button class="pill ghost" data-act="add-cf" data-list="' + pair[0] + '">Add</button></div>';
-      if (!list.length) html += '<div class="empty"><p>Nothing entered yet</p></div>';
+      if (!list.length) html += emptyState("Nothing here yet", "Add an item to this list.", "add-cf", "Add one", ' data-list="' + pair[0] + '"');
       else {
         html += '<div class="list-card">';
         list.forEach(function (r) {
@@ -1772,7 +1916,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
   function renderInsurance(model) {
     let html = backMore() + "<h1>Insurance</h1></div><div id=\"views\" class=\"view\">";
-    if (!model.insurance.length) html += '<div class="empty"><h3>Nothing entered yet</h3></div>';
+    if (!model.insurance.length) html += emptyState("No policies yet", "Add an insurance policy.", "add-ins", "Add a policy");
     else {
       html += '<div class="list-card">';
       model.insurance.forEach(function (r) {
@@ -1789,7 +1933,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function renderBusiness(model) {
     let html = backMore() + "<h1>Business</h1></div><div id=\"views\" class=\"view\">";
     html += '<p class="help-line" style="text-align:left">Identification numbers are not shown in this app.</p>';
-    if (!model.business.length) html += '<div class="empty"><h3>Nothing entered yet</h3></div>';
+    if (!model.business.length) html += emptyState("No businesses yet", "Add a business you own or help run.", "add-biz", "Add a business");
     else {
       html += '<div class="list-card">';
       model.business.forEach(function (r) {
@@ -1807,7 +1951,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const dated = model.history.filter(function (r) { return r.dateISO && (isNum(r.assets) || isNum(r.nw)); });
     let html = backMore() + "<h1>History</h1></div><div id=\"views\" class=\"view\">";
     if (dated.length >= 2) html += '<div class="card">' + sparkline(dated) + "</div>";
-    if (!model.history.length) html += '<div class="empty"><h3>Nothing entered yet</h3><p>Save a dated snapshot of net worth.</p></div>';
+    if (!model.history.length) html += emptyState("No snapshots yet", "Save a dated snapshot to see your net-worth trend.", "add-hist", "Add a snapshot");
     else {
       html += '<div class="list-card">';
       model.history.slice().reverse().forEach(function (r) {
@@ -1821,17 +1965,86 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     return html;
   }
 
+  function histNet(r) {
+    if (isNum(r.nw)) return Number(r.nw);
+    if (isNum(r.assets) || isNum(r.debts)) return Number(r.assets || 0) - Number(r.debts || 0);
+    return null;
+  }
+  function historyPoints(model) {
+    return (model.history || []).filter(function (r) {
+      return r.dateISO && isNum(histNet(r));
+    }).slice().sort(function (a, b) { return String(a.dateISO).localeCompare(String(b.dateISO)); });
+  }
+  function fmtChartDate(iso) {
+    if (!iso) return "—";
+    const p = String(iso).split("-").map(Number);
+    if (!p[0] || !p[1] || !p[2]) return String(iso);
+    const dt = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return dt.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" });
+  }
+  function trendSvg(vals, gid) {
+    const w = 320, h = 140, padX = 6, padY = 16;
+    if (!vals.length) return "";
+    const min0 = Math.min.apply(null, vals), max0 = Math.max.apply(null, vals);
+    const span = max0 - min0;
+    const min = span === 0 ? min0 - 1 : min0 - span * 0.08;
+    const max = span === 0 ? max0 + 1 : max0 + span * 0.08;
+    const coords = vals.map(function (v, i) {
+      const x = padX + (i * (w - 2 * padX) / Math.max(1, vals.length - 1));
+      const y = padY + (1 - (v - min) / (max - min)) * (h - 2 * padY);
+      return { x: x, y: y };
+    });
+    const line = coords.map(function (pt, i) {
+      return (i ? "L" : "M") + pt.x.toFixed(2) + " " + pt.y.toFixed(2);
+    }).join(" ");
+    const last = coords[coords.length - 1];
+    const area = line + " L" + last.x.toFixed(2) + " " + (h - 2) + " L" + coords[0].x.toFixed(2) + " " + (h - 2) + " Z";
+    let grid = "";
+    for (let i = 1; i <= 3; i++) {
+      const y = (padY + i * (h - 2 * padY) / 4).toFixed(1);
+      grid += '<line x1="' + padX + '" x2="' + (w - padX) + '" y1="' + y + '" y2="' + y + '" stroke="var(--sep)" stroke-width="1"/>';
+    }
+    return '<svg class="trend chart" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+      '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%" stop-color="var(--chart-stroke)" stop-opacity="0.34"/>' +
+      '<stop offset="100%" stop-color="var(--chart-stroke)" stop-opacity="0"/>' +
+      "</linearGradient></defs>" + grid +
+      '<path d="' + area + '" fill="url(#' + gid + ')"/>' +
+      '<path d="' + line + '" fill="none" stroke="var(--chart-stroke)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<circle cx="' + last.x.toFixed(2) + '" cy="' + last.y.toFixed(2) + '" r="4" fill="var(--chart-stroke)" stroke="var(--bg-elev)" stroke-width="2"/>' +
+      "</svg>";
+  }
+  function renderNwChart(model) {
+    const pts = historyPoints(model);
+    if (pts.length < 2) {
+      return '<button type="button" class="nw-chart" data-act="goto-history" data-testid="nw-chart">' +
+        '<div class="chart-kicker">Net worth trend</div>' +
+        '<div class="chart-empty" data-testid="nw-chart-empty">Add a History snapshot to see your trend</div>' +
+        "</button>";
+    }
+    const vals = pts.map(histNet);
+    const last = vals[vals.length - 1];
+    const prev = vals[vals.length - 2];
+    const delta = last - prev;
+    const dir = delta > 0.005 ? "up" : (delta < -0.005 ? "down" : "flat");
+    const pct = isNum(prev) && Number(prev) !== 0 ? (delta / Math.abs(Number(prev)) * 100) : null;
+    const arrow = dir === "up" ? "▲ " : (dir === "down" ? "▼ " : "");
+    const chg = arrow + (delta > 0 ? "+" : "") + money(delta) +
+      (pct != null ? " · " + (pct > 0 ? "+" : "") + pct.toFixed(1) + "%" : "") +
+      " vs " + fmtChartDate(pts[pts.length - 2].dateISO);
+    return '<button type="button" class="nw-chart ' + dir + '" data-act="goto-history" data-testid="nw-chart">' +
+      '<div class="chart-head"><div class="chart-kicker">Net worth trend</div>' +
+      '<div class="chart-latest" data-testid="nw-chart-latest">' + escapeHtml(money(last)) + "</div></div>" +
+      '<div class="chart-change ' + dir + '" data-testid="nw-chart-delta">' + escapeHtml(chg) + "</div>" +
+      trendSvg(vals, "nwGradHome") +
+      '<div class="chart-axis"><span>' + escapeHtml(fmtChartDate(pts[0].dateISO)) + "</span><span>" +
+      escapeHtml(fmtChartDate(pts[pts.length - 1].dateISO)) + "</span></div>" +
+      "</button>";
+  }
   function sparkline(rows) {
     const pts = rows.slice().sort(function (a, b) { return a.dateISO.localeCompare(b.dateISO); });
-    const vals = pts.map(function (r) { return isNum(r.nw) ? Number(r.nw) : (Number(r.assets || 0) - Number(r.debts || 0)); });
-    const min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
-    const w = 320, h = 140, p = 8;
-    const d = vals.map(function (v, i) {
-      const x = p + (i * (w - 2 * p) / Math.max(1, vals.length - 1));
-      const y = max === min ? h / 2 : p + (1 - (v - min) / (max - min)) * (h - 2 * p);
-      return x + "," + y;
-    }).join(" ");
-    return '<svg class="chart" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none"><polyline fill="none" stroke="#2A9D8F" stroke-width="3" points="' + d + '"/></svg>';
+    const vals = pts.map(histNet);
+    return trendSvg(vals, "nwGradHist");
   }
 
   function renderFx(model) {
@@ -1849,11 +2062,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function renderGuide(model) {
     let html = backMore() + "<h1>Guide</h1></div><div id=\"views\" class=\"view guide\">";
     html += "<div class=\"card\"><ol>" +
-      "<li>Tap Open Excel file and choose your workbook from Files.</li>" +
-      "<li>Add payments, loans, and balances with the + button. Changes stay on this device until you save.</li>" +
-      "<li>Save updated Excel, then open that file in Excel so locked formulas (principal, USD totals) recalculate.</li>" +
-      "<li>Interest is charged monthly on remaining principal (APR ÷ 12), interest-first, as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
-      "<li>Net worth = accounts + remaining loan principal + property equity (Include = Yes) − debts, once every loan is fully set up and every receipt has a date.</li>" +
+      "<li>Open Excel file, add entries, Save Excel, then Replace the file in Files.</li>" +
+      "<li>Use the + button to add a payment, balance, loan, or other item. Changes stay on this phone until you save.</li>" +
+      "<li>After you save, open the file in Excel so locked formulas (amount left, USD totals) recalculate.</li>" +
+      "<li>Interest is charged monthly on the amount still owed (APR ÷ 12), interest first, for the as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
+      "<li>Net worth = accounts + amount left on loans + property equity (included) − debts, once every loan is set up and every payment has a date.</li>" +
       "<li>This app never sends your data to a server and does not show business identification numbers.</li>" +
       "</ol></div></div>";
     return html;
@@ -2298,6 +2511,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (!writes.length) { closeSheet(); toast("No changes"); return; }
     if (spec.entity === "property") fields.include = String(fields.includeRaw || "Yes").toLowerCase() !== "no";
     if (spec.entity === "property" && fields.mortgage == null) fields.mortgage = 0;
+    if (spec.entity === "history" && !isNum(fields.nw) && (isNum(fields.assets) || isNum(fields.debts))) {
+      fields.nw = Number(fields.assets || 0) - Number(fields.debts || 0);
+    }
     let change;
     if (st.isNew) {
       const rowObj = Object.assign({ row: st.row, sheet: sheet }, fields);
@@ -2465,7 +2681,13 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         case "edit-receipt": openReceiptForm(row); break;
         case "add-loan": openLoanForm(null); break;
         case "edit-loan": openLoanForm(row); break;
-        case "add-asset": openAssetChooser(); break;
+        case "add-asset":
+        case "add-menu": openAddMenu(); break;
+        case "dismiss-hint":
+          state.hintDismissed = true;
+          try { localStorage.setItem("pf-hint-dismissed", "1"); } catch (e) {}
+          render();
+          break;
         case "add-account": openGeneric("account", null); break;
         case "add-property": openGeneric("property", null); break;
         case "edit-account": openGeneric("account", row); break;
@@ -2484,6 +2706,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         case "edit-asof": openAsOf(); break;
         case "goto-assets": state.view = "assets"; render(); break;
         case "goto-debts": state.view = "more"; state.moreScreen = "debts"; render(); break;
+        case "goto-history": state.view = "more"; state.moreScreen = "history"; render(); window.scrollTo(0, 0); break;
         case "more": state.moreScreen = t.getAttribute("data-screen") || "menu"; render(); window.scrollTo(0, 0); break;
         case "theme": {
           state.theme = state.theme === "auto" ? "dark" : state.theme === "dark" ? "light" : "auto";
@@ -2522,13 +2745,24 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }
   }
 
-  function openAssetChooser() {
-    openSheet('<div class="sheet-handle"></div><div class="sheet-head"><button class="pill ghost" data-act="close-sheet">Cancel</button><h2>Add</h2><span style="width:64px"></span></div><div class="sheet-body"><div class="list-card">' +
-      '<button class="row" data-act="add-account"><div class="body"><div class="title">Account balance</div></div>' + svg("chev", 18) + "</button>" +
-      '<button class="row" data-act="add-property"><div class="body"><div class="title">Property</div></div>' + svg("chev", 18) + "</button>" +
-      '<button class="row" data-act="add-debt"><div class="body"><div class="title">Debt</div></div>' + svg("chev", 18) + "</button>" +
+  function openAddMenu() {
+    function item(act, icon, color, title, meta, testid) {
+      return '<button class="row" data-act="' + act + '" data-testid="' + testid + '">' +
+        '<div class="icon-bubble" style="background:' + color + '">' + svg(icon, 18) + "</div>" +
+        '<div class="body"><div class="title">' + title + '</div><div class="meta">' + meta + "</div></div>" +
+        svg("chev", 18) + "</button>";
+    }
+    openSheet('<div class="sheet-handle"></div><div class="sheet-head"><button class="pill ghost" data-act="close-sheet">Cancel</button><h2>Add</h2><span style="width:64px"></span></div>' +
+      '<div class="sheet-body" data-testid="add-sheet"><div class="list-card">' +
+      item("add-receipt", "receipts", "var(--gold)", "Add payment", "A payment you received", "add-pick-receipt") +
+      item("add-account", "assets", "var(--teal)", "Add balance", "A bank or cash account", "add-pick-account") +
+      item("add-loan", "loans", "var(--navy)", "Add loan", "Money you have lent", "add-pick-loan") +
+      item("add-property", "assets", "var(--green)", "Add property", "A home or other property", "add-pick-property") +
+      item("add-debt", "loans", "var(--coral)", "Add debt", "Money you owe", "add-pick-debt") +
+      item("add-hist", "file", "var(--blue)", "Add snapshot", "Save a net-worth snapshot", "add-pick-hist") +
       "</div></div>");
   }
+  function openAssetChooser() { openAddMenu(); }
 
   async function boot() {
     applyTheme();
