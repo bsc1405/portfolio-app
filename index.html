@@ -1308,8 +1308,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (home) {
       model.cached.home = {
         A6: cell(home, "A6"), D6: cell(home, "D6"), G6: cell(home, "G6"),
+        B10: cell(home, "B10"), B11: cell(home, "B11"),
         B14: cell(home, "B14"), B15: cell(home, "B15"), B16: cell(home, "B16"),
-        B11: cell(home, "B11"), H17: cell(home, "H17")
+        B17: cell(home, "B17"), B18: cell(home, "B18"),
+        B19: cell(home, "B19"), B20: cell(home, "B20"), B21: cell(home, "B21"),
+        H17: cell(home, "H17")
       };
     }
     return model;
@@ -1434,11 +1437,17 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       if (!isNum(a.balance)) return s;
       return s + Number(a.balance) * fxRate(model, a.currency);
     }, 0);
-    const equityYes = model.properties.reduce(function (s, p) {
-      if (!isNum(p.value)) return s;
-      if (!p.include) return s;
+    function propertyEquityUsd(p) {
+      if (!isNum(p.value)) return 0;
       const eq = Number(p.value) - (isNum(p.mortgage) ? Number(p.mortgage) : 0);
-      return s + eq * fxRate(model, p.currency);
+      return eq * fxRate(model, p.currency);
+    }
+    const equityYes = model.properties.reduce(function (s, p) {
+      if (!p.include) return s;
+      return s + propertyEquityUsd(p);
+    }, 0);
+    const equityAll = model.properties.reduce(function (s, p) {
+      return s + propertyEquityUsd(p);
     }, 0);
     const debtsUsd = model.debts.reduce(function (s, d) {
       if (!isNum(d.balance)) return s;
@@ -1451,8 +1460,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }, 0);
     const unpaid = loanResults.reduce(function (s, r) { return s + (r.ready ? r.unpaid : 0); }, 0);
     const active = loanResults.filter(function (r) { return !r.inactive && r.id; }).length;
-    const nw = complete ? (accountsUsd + recvPrin + equityYes - debtsUsd) : null;
-    const assets = complete ? (accountsUsd + recvPrin + equityYes) : null;
+    const nw = complete ? (accountsUsd + recvPrin + equityAll - debtsUsd) : null;
+    const assets = complete ? (accountsUsd + recvPrin + equityAll) : null;
 
     // Cashflow simple yearly / open bills
     const incomeYr = model.cashflow.income.reduce(function (s, r) {
@@ -1472,7 +1481,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
     return {
       asOfISO: asOf, complete: complete, status: statusText, loans: loanResults,
-      accountsUsd: accountsUsd, equityYes: equityYes, debtsUsd: debtsUsd,
+      accountsUsd: accountsUsd, equityYes: equityYes, equityAll: equityAll, debtsUsd: debtsUsd,
       recvPrin: complete ? recvPrin : null, unpaid: unpaid, active: active,
       nw: nw, assets: assets, incomeYr: incomeYr, expYr: expYr, openBills: openBills
     };
@@ -1595,9 +1604,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (isNum(model.cached.accountsTotal) && !approx(model.cached.accountsTotal, computed.accountsUsd)) {
       msgs.push("Accounts total cached " + money(model.cached.accountsTotal) + " vs computed " + money(computed.accountsUsd));
     }
-    const eqCache = isNum(model.cached.equityInclude) ? model.cached.equityInclude : model.cached.equityAll;
-    if (isNum(eqCache) && !approx(eqCache, computed.equityYes)) {
-      msgs.push("Property equity cached " + money(eqCache) + " vs computed " + money(computed.equityYes));
+    if (isNum(model.cached.equityAll) && !approx(model.cached.equityAll, computed.equityAll)) {
+      msgs.push("Property equity cached " + money(model.cached.equityAll) + " vs computed " + money(computed.equityAll));
+    }
+    if (isNum(model.cached.equityInclude) && !approx(model.cached.equityInclude, computed.equityYes)) {
+      msgs.push("Included property equity (memo) cached " + money(model.cached.equityInclude) + " vs computed " + money(computed.equityYes));
     }
     if (isNum(model.cached.debtsTotal) && !approx(model.cached.debtsTotal, computed.debtsUsd)) {
       msgs.push("Debts cached " + money(model.cached.debtsTotal) + " vs computed " + money(computed.debtsUsd));
@@ -1615,6 +1626,32 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const h = model.cached.home || {};
     if (isNum(h.A6) && computed.complete && !approx(h.A6, computed.nw)) {
       msgs.push("Net worth cached " + money(h.A6) + " vs computed " + money(computed.nw));
+    }
+    const assetsCache = isNum(h.D6) ? h.D6 : h.B10;
+    if (isNum(assetsCache) && computed.complete && !approx(assetsCache, computed.assets)) {
+      msgs.push("Total assets cached " + money(assetsCache) + " vs computed " + money(computed.assets));
+    }
+    if (isNum(h.B14) && !approx(h.B14, computed.accountsUsd)) {
+      msgs.push("Accounts cached " + money(h.B14) + " vs computed " + money(computed.accountsUsd));
+    }
+    if (isNum(h.B15) && computed.complete && !approx(h.B15, computed.recvPrin)) {
+      msgs.push("Money lent cached " + money(h.B15) + " vs computed " + money(computed.recvPrin));
+    }
+    if (isNum(h.B16) && !approx(h.B16, computed.equityAll)) {
+      msgs.push("Property equity cached " + money(h.B16) + " vs computed " + money(computed.equityAll));
+    }
+    const debtsCache = isNum(h.B18) ? h.B18 : (isNum(h.G6) ? h.G6 : h.B11);
+    if (isNum(debtsCache) && !approx(debtsCache, computed.debtsUsd)) {
+      msgs.push("Debts cached " + money(debtsCache) + " vs computed " + money(computed.debtsUsd));
+    }
+    if (isNum(h.B19) && !approx(h.B19, computed.openBills)) {
+      msgs.push("Open bills cached " + money(h.B19) + " vs computed " + money(computed.openBills));
+    }
+    if (isNum(h.B20) && !approx(h.B20, computed.incomeYr)) {
+      msgs.push("Planned income cached " + money(h.B20) + " vs computed " + money(computed.incomeYr));
+    }
+    if (isNum(h.B21) && !approx(h.B21, computed.expYr)) {
+      msgs.push("Planned expenses cached " + money(h.B21) + " vs computed " + money(computed.expYr));
     }
     return msgs;
   }
@@ -1888,7 +1925,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     html += "</div>";
     html += "<div class=\"stat-row\">";
     html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Accounts</div><div class="v ' + moneyClass(comp.accountsUsd) + '" data-testid="accounts-value">' + money(comp.accountsUsd) + "</div></button>";
-    html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Property equity</div><div class="v ' + moneyClass(comp.equityYes) + '" data-testid="equity-value">' + money(comp.equityYes) + "</div></button>";
+    html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Property equity</div><div class="v ' + moneyClass(comp.equityAll) + '" data-testid="equity-value">' + money(comp.equityAll) + "</div></button>";
     html += '<button class="stat pressable" data-tab="loans"><div class="k">Money lent</div><div class="v ' + (comp.complete ? moneyClass(comp.recvPrin) : "status-txt") + '" data-testid="recv-value">' +
       (comp.complete ? money(comp.recvPrin) : "Setup needed") + "</div></button>";
     html += '<button class="stat pressable" data-act="goto-debts"><div class="k">Debts</div><div class="v ' + moneyClass(comp.debtsUsd, true) + '" data-testid="debts-value">' + money(comp.debtsUsd) + "</div></button>";
@@ -2071,7 +2108,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         { id: "amount-desc", label: "Amount, high to low" },
         { id: "amount-asc", label: "Amount, low to high" }
       ],
-      summary: "Accounts " + money(comp.accountsUsd) + " · Property equity " + money(comp.equityYes)
+      summary: "Accounts " + money(comp.accountsUsd) + " · Property equity " + money(comp.equityAll)
     });
     html += '<div class="section-label">Accounts · ' + accounts.length + "</div>";
     if (!accounts.length) html += emptyState(q ? "No matching accounts" : "No accounts yet", q ? "Try a different search." : "Add a bank or cash balance.", q ? "" : "add-account", q ? "" : "Add a balance");
@@ -2094,7 +2131,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       page.rows.forEach(function (pr) {
         const eq = isNum(pr.value) ? (Number(pr.value) - (pr.mortgage || 0)) * fxRate(model, pr.currency) : null;
         html += '<button class="row" data-act="edit-property" data-row="' + pr.row + '"><div class="body"><div class="title">' +
-          escapeHtml(pr.name || "Property") + '</div><div class="meta">' + (pr.include ? "Included in net worth" : "Excluded from net worth") +
+          escapeHtml(pr.name || "Property") + '</div><div class="meta">' + (pr.include ? "Include in NW? Yes (memo)" : "Include in NW? No (memo)") +
           "</div></div><div class=\"right " + moneyClass(eq) + '">' + money(eq) + "</div>" + svg("chev", 18) + "</button>";
       });
       html += "</div>" + showMoreBtn("properties", page);
@@ -2397,7 +2434,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       "<li>Use the + button to add a payment, balance, loan, or other item. Changes stay on this phone until you save.</li>" +
       "<li>After you save, open the file in Excel so locked formulas (amount left, USD totals) recalculate.</li>" +
       "<li>Interest is charged monthly on the amount still owed (APR ÷ 12), interest first, for the as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
-      "<li>Net worth = accounts + amount left on loans + property equity (included) − debts, once every loan is set up and every payment has a date.</li>" +
+      "<li>Net worth = accounts + amount left on loans + all property equity − debts, once every loan is set up and every payment has a date.</li>" +
       "<li>This app never sends your data to a server and does not show business identification numbers.</li>" +
       "</ol></div></div>";
     return html;
