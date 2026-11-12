@@ -326,7 +326,8 @@ a { color: var(--blue); }
   gap: 2px; color: var(--secondary); font-size: 10px; font-weight: 600;
   transition: color 0.15s, transform 0.12s;
 }
-#tabbar button svg { width: 26px; height: 26px; }
+#tabbar button svg { width: 26px; height: 26px; flex: none; }
+#tabbar button span { text-align: center; line-height: 1.1; max-width: 84px; }
 #tabbar button.on { color: var(--navy); }
 :root[data-theme="dark"] #tabbar button.on { color: #7EB0FF; }
 @media (prefers-color-scheme: dark) {
@@ -636,6 +637,7 @@ ol.steps li.done::before { background: var(--green); content: "✓"; }
     font-size: 15px;
   }
   #tabbar button svg { width: 22px; height: 22px; }
+  #tabbar button span { max-width: none; text-align: left; }
   #views { padding-bottom: 32px; }
   .fab { bottom: 28px; }
 }
@@ -986,15 +988,18 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const sheets = {};
     const sheetPaths = {};
     const dvs = {};
+    let loanMode = "usd";
     for (const sh of sheetList) {
       if (sh.name.toLowerCase() === "app") continue;
       const xml = await zip.file(sh.path).async("string");
       sheets[sh.name] = { name: sh.name, path: sh.path, cells: parseSheetCells(xml, sst) };
       sheetPaths[sh.name] = sh.path;
       dvs[sh.name] = parseValidations(xml);
+      if (sh.name.toLowerCase() === "loans") loanMode = /FX rate needed/.test(xml) ? "fx" : "usd";
     }
     const parsed = extractModel(sheets);
     parsed._dv = dvs;
+    parsed.loanMode = loanMode;
     parsed._sheetPaths = sheetPaths;
     parsed._unlocked = [...unlocked];
     parsed._raw = {};
@@ -1444,13 +1449,24 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function blankCell(v) { return v == null || String(v) === ""; }
 
   /* Port of Loans!Q (terms check), JZ (receipt check), backend amortization and W (status). */
-  function loanTerms(loan, loans, asOfISO) {
+  // New workbook formulas: rate = 1 for USD, else FX!D (VLOOKUP; no rate / not listed → not a number).
+  function fxLoanRate(model, code) {
+    if (ciEq(code, "USD")) return 1;
+    const row = fxRow(model, code);
+    const e = row ? fxEffective(row) : null;
+    return e == null ? NaN : e;
+  }
+  function loanTerms(loan, loans, asOfISO, model) {
+    const mode = model.loanMode || "usd";
     const filled = !!(!blankCell(loan.id) || !blankCell(loan.borrower) || !blankCell(loan.purpose) || !blankCell(loan.currency) ||
       isNum(loan.opening) || !blankCell(loan.apr) || !blankCell(loan.payments) || !blankCell(loan.freq) || loan.startISO);
     if (!filled) return "Inactive";
     if (blankCell(loan.id)) return "Loan ID needed";
     if (loans.filter(function (l) { return l.id && ciEq(l.id, loan.id); }).length > 1) return "Duplicate loan ID";
-    if (!ciEq(loan.currency, "USD")) return "USD only";
+    if (mode === "fx") {
+      if (blankCell(loan.currency)) return "Currency needed";
+      if (!ciEq(loan.currency, "USD") && !Number.isFinite(fxLoanRate(model, loan.currency))) return "FX rate needed";
+    } else if (!ciEq(loan.currency, "USD")) return "USD only";
     if (!isNum(loan.opening)) return "Opening principal needed";
     if (Number(loan.opening) < 0) return "Invalid principal";
     if (!isNum(loan.apr)) return "APR needed (blank is not zero)";
@@ -1465,7 +1481,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (monthIdx(asOfISO) - monthIdx(loan.startISO) + 1 > 360) return "360-period horizon exceeded";
     return "OK";
   }
-  function receiptCheck(r, loans, terms, asOfISO) {
+  function receiptCheck(r, loans, terms, asOfISO, mode) {
     const any = !blankCell(r.loanId) || r.dateRaw != null && r.dateRaw !== "" || r.dateISO || (r.amountRaw != null && r.amountRaw !== "") || isNum(r.amount) || !blankCell(r.currency) || !blankCell(r.notes);
     if (!any) return { status: "Blank", slot: -1 };
     if (blankCell(r.loanId)) return { status: "Loan ID needed", slot: -1 };
@@ -1478,7 +1494,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (asOfISO && r.dateISO > asOfISO) return out("Future receipt date");
     if (!isNum(r.amount)) return out("Amount needed");
     if (Number(r.amount) <= 0) return out("Positive amount needed");
-    if (!ciEq(r.currency, "USD")) return out("USD receipt required");
+    if (mode !== "fx" && !ciEq(r.currency, "USD")) return out("USD receipt required");
     if (!ciEq(r.currency, loans[slot].currency)) return out("Currency mismatch");
     if (terms[slot] !== "OK") return out("Loan terms needed");
     if (monthIdx(r.dateISO) < monthIdx(loans[slot].startISO)) return out("Before first payment month");
@@ -1488,8 +1504,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function computeLoans(model) {
     const asOf = model.asOfISO;
     const loans = model.loans;
-    const terms = loans.map(function (l) { return loanTerms(l, loans, asOf); });
-    const checks = model.receipts.map(function (r) { return receiptCheck(r, loans, terms, asOf); });
+    const mode = model.loanMode || "usd";
+    const terms = loans.map(function (l) { return loanTerms(l, loans, asOf, model); });
+    const checks = model.receipts.map(function (r) { return receiptCheck(r, loans, terms, asOf, mode); });
     model.receipts.forEach(function (r, i) { r._check = checks[i].status; });
     const asOfM = monthIdx(asOf);
     const results = loans.map(function (loan, i) {
@@ -1552,6 +1569,13 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         if (out.overpay > 0) out.issues.push("Overpayment — review");
       }
       if (!out.ready) { out.principal = null; out.unpaid = 0; }
+      // Loans!AC:AG — USD equivalents (old USD-only workbooks: rate 1).
+      out.currency = curCode(loan.currency);
+      out.rate = t === "OK" ? (mode === "fx" ? fxLoanRate(model, loan.currency) : 1) : null;
+      out.principalUsd = out.ready ? out.principal * out.rate : null;
+      out.unpaidUsd = out.ready ? out.unpaid * out.rate : null;
+      out.receivedUsd = out.ready ? out.receivedIncluded * out.rate : null;
+      out.openingUsd = out.ready ? Number(loan.opening) * out.rate : null;
       return out;
     });
     const receiptsOk = checks.every(function (c) { return c.status === "OK" || c.status === "Blank"; });
@@ -1578,8 +1602,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const equityAll = sum(model.properties, propertyEquityUsd);
     // Loans!F (debts) = IF(OR(A="",D=""),"",D*rate)
     const debtsUsd = sum(model.debts, function (d) { return (!blankCell(d.name) && isNum(d.balance)) ? Number(d.balance) * fxRate(model, d.currency) : null; });
-    const recvPrin = sum(loanResults, function (r) { return r.ready && isNum(r.principal) ? r.principal : null; });
-    const unpaid = sum(loanResults, function (r) { return r.ready ? r.unpaid : null; });
+    const recvPrin = sum(loanResults, function (r) { return r.ready && isNum(r.principalUsd) ? r.principalUsd : null; });
+    const unpaid = sum(loanResults, function (r) { return r.ready ? r.unpaidUsd : null; });
+    const openingUsd = sum(loanResults, function (r) { return r.ready ? r.openingUsd : null; });
+    const receivedUsd = sum(loanResults, function (r) { return r.ready ? r.receivedUsd : null; });
     const active = loanResults.filter(function (r) { return !r.inactive; }).length;
     // Home wraps each part in IFERROR(…, 0): a part showing #VALUE! (currency with no rate) counts as 0.
     const z = function (v) { return Number.isFinite(v) ? v : 0; };
@@ -1605,7 +1631,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       accountsUsd: accountsUsd, equityYes: equityYes, equityAll: equityAll, debtsUsd: debtsUsd,
       recvPrin: complete ? recvPrin : null, unpaid: unpaid, active: active,
       nw: nw, assets: assets, incomeYr: incomeYr, expYr: expYr, openBills: openBills,
-      fxErrors: fxErrors, noRate: noRate
+      fxErrors: fxErrors, noRate: noRate, loanMode: model.loanMode || "usd",
+      openingUsd: complete ? openingUsd : null, receivedUsd: complete ? receivedUsd : null
     };
   }
 
@@ -2014,9 +2041,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function renderTabs() {
     const tabs = [
       { id: "home", label: "Home", icon: "home" },
-      { id: "loans", label: "Loans", icon: "loans" },
-      { id: "receipts", label: "Payments", icon: "receipts" },
-      { id: "assets", label: "Assets", icon: "assets" },
+      { id: "loans", label: "Loans & Receivables", icon: "loans" },
+      { id: "receipts", label: "Receipt log", icon: "receipts" },
+      { id: "assets", label: "Accounts & Properties", icon: "assets" },
       { id: "more", label: "More", icon: "more" }
     ];
     return '<nav id="tabbar">' + tabs.map(function (t) {
@@ -2052,11 +2079,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const asOf = comp.asOfISO ? fmtChartDate(comp.asOfISO) : "Not set";
     html += '<div class="top-grid"><div class="hero-grid">';
     if (comp.complete) {
-      html += '<div class="hero navy" data-testid="nw-card"><div class="kicker">Net worth</div><div class="value" data-testid="nw-value">' +
+      html += '<div class="hero navy" data-testid="nw-card"><div class="kicker">Net worth (USD)</div><div class="value" data-testid="nw-value">' +
         escapeHtml(money(comp.nw)) + '</div><button type="button" class="sub asof-link" data-act="edit-asof">As of ' +
         escapeHtml(asOf) + "</button></div>";
     } else {
-      html += '<div class="hero status" data-testid="nw-card"><div class="kicker">Net worth</div><div class="value" data-testid="nw-value">' +
+      html += '<div class="hero status" data-testid="nw-card"><div class="kicker">Net worth (USD)</div><div class="value" data-testid="nw-value">' +
         escapeHtml(STATUS_INCOMPLETE) + '</div><button type="button" class="sub asof-link" data-act="edit-asof">As of ' +
         escapeHtml(asOf) + " · Open Loans to finish</button></div>";
     }
@@ -2064,28 +2091,29 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     html += renderNwChart(model);
     html += "</div>";
     html += "<div class=\"stat-row\">";
-    html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Accounts</div><div class="v ' + moneyClass(comp.accountsUsd) + '" data-testid="accounts-value">' + money(comp.accountsUsd) + "</div></button>";
-    html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Property equity</div><div class="v ' + moneyClass(comp.equityAll) + '" data-testid="equity-value">' + money(comp.equityAll) + "</div></button>";
-    html += '<button class="stat pressable" data-tab="loans"><div class="k">Money lent</div><div class="v ' + (comp.complete ? moneyClass(comp.recvPrin) : "status-txt") + '" data-testid="recv-value">' +
+    html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Accounts (in NW)</div><div class="v ' + moneyClass(comp.accountsUsd) + '" data-testid="accounts-value">' + money(comp.accountsUsd) + "</div></button>";
+    html += '<button class="stat pressable" data-act="goto-assets"><div class="k">Properties equity</div><div class="v ' + moneyClass(comp.equityAll) + '" data-testid="equity-value">' + money(comp.equityAll) + "</div></button>";
+    html += '<button class="stat pressable" data-tab="loans"><div class="k">Receivables (principal)</div><div class="v ' + (comp.complete ? moneyClass(comp.recvPrin) : "status-txt") + '" data-testid="recv-value">' +
       (comp.complete ? money(comp.recvPrin) : "Setup needed") + "</div></button>";
-    html += '<button class="stat pressable" data-act="goto-debts"><div class="k">Debts</div><div class="v ' + moneyClass(comp.debtsUsd, true) + '" data-testid="debts-value">' + money(comp.debtsUsd) + "</div></button>";
+    html += '<button class="stat pressable" data-act="goto-debts"><div class="k">Debts owed</div><div class="v ' + moneyClass(comp.debtsUsd, true) + '" data-testid="debts-value">' + money(comp.debtsUsd) + "</div></button>";
     html += "</div>";
     if (comp.complete) {
       html += '<div class="stat-row"><div class="stat"><div class="k">Total assets</div><div class="v ' + moneyClass(comp.assets) + '">' + money(comp.assets) + "</div></div>";
-      html += '<div class="stat"><div class="k">Unpaid interest</div><div class="v">' + money(comp.unpaid) + '</div><div class="meta">Not included in net worth</div></div></div>';
+      html += '<div class="stat"><div class="k">Unpaid interest (USD)</div><div class="v">' + money(comp.unpaid) + '</div><div class="meta">Not included in net worth</div></div></div>';
     }
-    html += '<div class="section-label">Loans</div>';
+    html += '<div class="section-label">Receivables</div>';
+    if (comp.complete) html += '<div class="stat-row"><div class="stat"><div class="k">Opening total</div><div class="v">' + money(comp.openingUsd) + '</div></div><div class="stat"><div class="k">Received total</div><div class="v ' + moneyClass(comp.receivedUsd) + '">' + money(comp.receivedUsd) + "</div></div></div>";
     const active = model.loans.filter(function (l) { return l.id; });
     if (!active.length) html += emptyState("No loans yet", "Add a loan to track money you have lent.", "add-loan", "Add a loan");
     else {
       html += '<div class="list-card">';
       active.forEach(function (l) {
         const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
-        const right = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
-        const cls = r.ready ? moneyClass(r.principal) : "";
+        const right = r.ready ? money(r.principalUsd) : escapeHtml(r.status || "—");
+        const cls = r.ready ? moneyClass(r.principalUsd) : "";
         html += '<button class="row" data-act="edit-loan" data-row="' + l.row + '"><div class="icon-bubble" style="background:' + (r.ready ? "var(--green)" : "var(--gold)") + '">' + svg("loans", 18) + "</div>" +
           '<div class="body"><div class="title">' + escapeHtml(l.id) + (l.borrower && l.borrower !== l.id ? " · " + escapeHtml(l.borrower) : "") + "</div>" +
-          '<div class="meta">' + (r.ready ? "Amount left" : escapeHtml((r.issues || []).slice(0, 2).join(" · "))) + "</div></div>" +
+          '<div class="meta">' + (r.ready ? "Principal left (USD)" + (r.currency !== "USD" ? " · " + escapeHtml(moneyCur(r.principal, r.currency)) : "") : escapeHtml((r.issues || []).slice(0, 2).join(" · "))) + "</div></div>" +
           '<div class="right ' + cls + '">' + right + "</div>" + svg("chev", 18) + "</button>";
       });
       html += "</div>";
@@ -2096,7 +2124,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
 
   function renderLoans(model, comp) {
-    let html = headerBar("Loans", "Money you have lent") + '<div id="views" class="view" data-testid="screen-loans">';
+    let html = headerBar("Loans & Receivables", "Loans sheet · money you have lent") + '<div id="views" class="view" data-testid="screen-loans">';
     let active = model.loans.filter(function (l) { return l.id; });
     const q = lq("loans").trim().toLowerCase();
     if (q) active = active.filter(function (l) {
@@ -2105,8 +2133,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         (l.purpose || "").toLowerCase().indexOf(q) >= 0;
     });
     const ready = active.map(function (l) { return comp.loans.find(function (x) { return x.id === l.id; }) || {}; });
-    const totalLeft = ready.reduce(function (s, r) { return s + (r.ready && isNum(r.principal) ? Number(r.principal) : 0); }, 0);
-    html += listToolbar("loans", { placeholder: "Search loans", summary: (q ? active.length + " of " : "") + model.loans.filter(function (l) { return l.id; }).length + " loans · Amount left " + money(comp.complete ? totalLeft : null) });
+    const totalLeft = ready.reduce(function (s, r) { return s + (r.ready && isNum(r.principalUsd) ? Number(r.principalUsd) : 0); }, 0);
+    html += listToolbar("loans", { placeholder: "Search loans", summary: (q ? active.length + " of " : "") + model.loans.filter(function (l) { return l.id; }).length + " loans · Receivables total (USD) " + money(comp.complete ? totalLeft : null) });
     if (!active.length) html += emptyState(q ? "No matching loans" : "No loans yet", q ? "Try a different search." : "Add a loan to track money you have lent.", q ? "" : "add-loan", q ? "" : "Add a loan");
     else {
       html += '<div class="loans-grid">';
@@ -2117,15 +2145,16 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           (l.purpose ? " · " + escapeHtml(l.purpose) : "") + (curCode(l.currency) !== "USD" ? " · " + escapeHtml(curCode(l.currency)) : "") + "</div></div>";
         html += r.ready ? '<span class="chip green">Ready</span>' : '<span class="chip amber">' + escapeHtml(r.status || "Setup") + "</span>";
         html += '</div><div class="grid">';
-        html += '<div><div class="f">Started with</div><div class="n">' + moneyCur(l.opening, l.currency) + "</div></div>";
-        html += '<div><div class="f">APR</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
-        html += '<div><div class="f">Payments</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
+        html += '<div><div class="f">Opening principal</div><div class="n">' + moneyCur(l.opening, l.currency) + "</div></div>";
+        html += '<div><div class="f">Rate (APR)</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
+        html += '<div><div class="f"># Payments · Freq</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
         html += '<div><div class="f">Start date</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
-        html += '<div><div class="f">Received so far</div><div class="n ' + moneyClass(r.receivedIncluded) + '">' + money(r.receivedIncluded) + "</div></div>";
-        const prinTxt = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
+        html += '<div><div class="f">Received (auto)</div><div class="n ' + moneyClass(r.receivedIncluded) + '">' + moneyCur(r.receivedIncluded, l.currency) + "</div></div>";
+        const prinTxt = r.ready ? moneyCur(r.principal, l.currency) : escapeHtml(r.status || "—");
         const prinAttr = "";
-        html += '<div><div class="f">Amount left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
-        if (r.ready && r.unpaid > 0) html += '<div><div class="f">Unpaid interest</div><div class="n">' + money(r.unpaid) + "</div></div>";
+        html += '<div><div class="f">Principal left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
+        if (r.ready && r.currency !== "USD") html += '<div><div class="f">Principal left (USD)</div><div class="n ' + moneyClass(r.principalUsd) + '">' + money(r.principalUsd) + "</div></div>";
+        if (r.ready && r.unpaid > 0) html += '<div><div class="f">Unpaid interest</div><div class="n">' + moneyCur(r.unpaid, l.currency) + "</div></div>";
         html += "</div></button>";
       });
       html += "</div>";
@@ -2153,8 +2182,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       if (sort === "loan") return (a.loanId || "").localeCompare(b.loanId || "") || (b.dateISO || "").localeCompare(a.dateISO || "");
       return (b.dateISO || "").localeCompare(a.dateISO || "") || (b.row - a.row);
     });
-    const sum = rows.reduce(function (s, r) { return s + (isNum(r.amount) ? Number(r.amount) : 0); }, 0);
-    let html = headerBar("Payments", "Money you have received") + '<div id="views" class="view" data-testid="screen-receipts">';
+    const usdOf = function (r) { if (!isNum(r.amount)) return 0; const k = (model.loanMode === "fx") ? fxLoanRate(model, r.currency) : 1; return Number(r.amount) * (Number.isFinite(k) ? k : 0); };
+    const sum = rows.reduce(function (s, r) { return s + usdOf(r); }, 0);
+    let html = headerBar("Receipt log", "Loans sheet · money you have received") + '<div id="views" class="view" data-testid="screen-receipts">';
     html += listToolbar("receipts", {
       placeholder: "Search by loan, date, or note",
       sortDefault: "newest",
@@ -2166,7 +2196,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         { id: "loan", label: "By loan" }
       ],
       groupLabel: "Group by loan",
-      summary: rows.length + " payment" + (rows.length === 1 ? "" : "s") + " · " + money(sum)
+      summary: rows.length + " receipt" + (rows.length === 1 ? "" : "s") + " · " + money(sum) + " (USD)"
     });
     if (!rows.length) html += emptyState(q ? "No matching payments" : "No payments yet", q ? "Try a different search." : "Log a payment you have received.", q ? "" : "add-receipt", q ? "" : "Add a payment");
     else if (lg("receipts")) {
@@ -2179,7 +2209,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const keys = Object.keys(groups).sort();
       keys.forEach(function (k) {
         const g = groups[k];
-        const gsum = g.reduce(function (s, r) { return s + (isNum(r.amount) ? Number(r.amount) : 0); }, 0);
+        const gsum = g.reduce(function (s, r) { return s + usdOf(r); }, 0);
         html += '<div class="section-label">' + escapeHtml(k) + " · " + g.length + " · " + money(gsum) + "</div>";
         const page = pageSlice(g, "receipts-g-" + k);
         html += '<div class="list-card">';
@@ -2240,7 +2270,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       accounts.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
       properties.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
     }
-    let html = headerBar("Assets", "Accounts & property") + '<div id="views" class="view" data-testid="screen-assets">';
+    let html = headerBar("Accounts & Properties", "Accounts and Properties sheets") + '<div id="views" class="view" data-testid="screen-assets">';
     html += listToolbar("assets", {
       placeholder: "Search accounts and property",
       sorts: [
@@ -2295,14 +2325,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (state.moreScreen === "guide") return renderGuide(model);
     let html = headerBar("More", "Menu") + '<div id="views" class="view" data-testid="screen-menu">';
     const items = [
-      ["debts", "Debts", "Money you owe", money(comp.debtsUsd)],
-      ["cashflow", "Cash flow", "Income, expenses, and bills", ""],
+      ["debts", "Debts", "Loans sheet · money you owe", money(comp.debtsUsd)],
+      ["cashflow", "Cashflow", "Income · Expenses · Bills", ""],
       ["insurance", "Insurance", "Policies", model.insurance.length ? String(model.insurance.length) : ""],
-      ["business", "Business", "Entities (IDs stay private)", model.business.length ? String(model.business.length) : ""],
-      ["history", "History", "Net worth over time", ""],
-      ["fx", "Currencies", "Exchange rates (FX sheet)", model.fx.length ? String(model.fx.length) : ""],
-      ["types", "Types", "Dropdown lists (Types sheet)", ""],
-      ["guide", "Guide", "How this app works", ""]
+      ["business", "Business", "One row per business / entity", model.business.length ? String(model.business.length) : ""],
+      ["history", "History", "Balance history", ""],
+      ["fx", "FX", "Currencies & FX", model.fx.length ? String(model.fx.length) : ""],
+      ["types", "Types", "Manage dropdown catalogs", ""],
+      ["guide", "Guide", "How this app and the workbook work", ""]
     ];
     html += '<div class="list-card">';
     items.forEach(function (it) {
@@ -2370,10 +2400,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
 
   function renderCashflow(model, comp) {
-    let html = backMore() + "<h1>Cash flow</h1></div><div id=\"views\" class=\"view\">";
-    html += '<div class="stat-row"><div class="stat"><div class="k">Income / yr (USD)</div><div class="v ' + moneyClass(comp.incomeYr) + '">' + money(comp.incomeYr) + "</div></div>";
-    html += '<div class="stat"><div class="k">Expenses / yr (USD)</div><div class="v ' + moneyClass(comp.expYr, true) + '">' + money(comp.expYr) + "</div></div></div>";
-    html += '<div class="stat" style="margin-bottom:12px"><div class="k">Open bills (USD)</div><div class="meta">Net plan ' + money(comp.incomeYr - comp.expYr) + '</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
+    let html = backMore() + "<h1>Cashflow</h1></div><div id=\"views\" class=\"view\">";
+    html += '<div class="stat-row"><div class="stat"><div class="k">Income (USD/yr)</div><div class="v ' + moneyClass(comp.incomeYr) + '">' + money(comp.incomeYr) + "</div></div>";
+    html += '<div class="stat"><div class="k">Expenses (USD/yr)</div><div class="v ' + moneyClass(comp.expYr, true) + '">' + money(comp.expYr) + "</div></div></div>";
+    html += '<div class="stat" style="margin-bottom:12px"><div class="k">Open bills</div><div class="meta">Net plan ' + money(comp.incomeYr - comp.expYr) + '</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
     const q = lq("cashflow").trim().toLowerCase();
     html += listToolbar("cashflow", { placeholder: "Search income, expenses, and bills" });
     [["income", "Income"], ["expenses", "Expenses"], ["bills", "Bills"]].forEach(function (pair) {
@@ -2567,15 +2597,15 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
 
   function renderFx(model) {
-    let html = backMore() + "<h1>Currencies</h1></div><div id=\"views\" class=\"view\">";
-    html += '<p class="help-line" style="text-align:left">Every amount is converted to USD with these rates, the same way the Excel FX sheet does. Tap a currency to change its rate.</p>';
+    let html = backMore() + "<h1>FX</h1></div><div id=\"views\" class=\"view\">";
+    html += '<p class="help-line" style="text-align:left">Currencies & FX · base / reporting currency USD. Every amount (loans too) converts to USD with the Effective rate used, the same as the FX sheet. Tap a currency to change its rate.</p>';
     html += '<div class="list-card">';
     model.fx.forEach(function (r) {
       const eff = fxEffective(r);
       const usdPer = isNum(eff) && eff !== 0 ? 1 / eff : null;
       html += '<button class="row" data-act="edit-fx" data-row="' + r.row + '" data-testid="fx-' + escapeHtml(r.code) + '"><div class="body"><div class="title">' +
-        escapeHtml(r.code) + '</div><div class="meta">' + (isNum(eff) ? (r.code.toUpperCase() === "USD" ? "Base currency · 1 USD = " + Number(eff).toPrecision(6) + " USD" : "1 USD = " + Number(usdPer.toPrecision(6)).toLocaleString("en-US", { maximumFractionDigits: 4 }) + " " + escapeHtml(r.code) + " · 1 " + escapeHtml(r.code) + " = $" + Number(eff).toPrecision(4)) : "No rate yet") +
-        '</div></div><span class="chip ' + (isNum(eff) ? "" : "amber") + '">' + escapeHtml(({ "From 1 USD =": "Typed", "Manual override": "Manual", "Pasted live": "Live", "Fallback (offline)": "Fallback" })[fxStatus(r)] || fxStatus(r)) + "</span>" + svg("chev", 18) + "</button>";
+        escapeHtml(r.code) + '</div><div class="meta">' + (isNum(eff) ? (r.code.toUpperCase() === "USD" ? "Base / reporting currency · Effective rate used " + Number(eff).toPrecision(6) : "Effective rate used " + Number(eff).toPrecision(4) + " · 1 USD = " + Number(usdPer.toPrecision(6)).toLocaleString("en-US", { maximumFractionDigits: 4 }) + " " + escapeHtml(r.code)) : "No rate yet") +
+        '</div></div><span class="chip ' + (isNum(eff) ? "" : "amber") + '">' + escapeHtml(fxStatus(r)) + "</span>" + svg("chev", 18) + "</button>";
     });
     html += "</div>";
     const free = (model.fxRange ? model.fxRange.last - model.fxRange.first + 1 : 34) - model.fx.length;
@@ -2607,7 +2637,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       "<li>After you save, open the file in Excel so locked formulas (amount left, USD totals) recalculate.</li>" +
       "<li>Interest is charged monthly on the amount still owed (APR ÷ 12), interest first, for the as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
       "<li>Net worth = accounts + amount left on loans + all property equity − debts, once every loan is set up and every payment has a date.</li>" +
-      "<li>Currencies: pick one on any account, property, debt, or cash-flow item. Amounts convert to USD with the rates in More → Currencies (same order as Excel FX). Loans and their payments stay USD, as Excel requires.</li>" +
+      "<li>Currencies: pick one on any account, property, debt, or cash-flow item. Amounts convert to USD with the rates in More → Currencies (same order as Excel FX). Loans & Receivables use the loan's own currency (receipts must match it); Home adds them in USD.</li>" +
       "<li>This app never sends your data to a server and does not show business identification numbers.</li>" +
       "</ol></div>";
     if (model.guide && model.guide.length) {
@@ -2730,10 +2760,36 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       else if (!Number.isFinite(rate)) txt = "No rate for " + code + " on the FX sheet yet — Excel totals show an error until you add one (More → Currencies).";
       else txt = "1 " + code + " = " + Number(rate).toPrecision(6) + " USD" + (amt != null && !Number.isNaN(amt) ? " · " + moneyCur(amt, code) + " ≈ " + money(amt * rate) : "");
     }
-    if (st.kind === "loan" && code !== "USD") txt = "Excel's interest sheet works in USD only. With " + code + " this loan shows “Terms needed: USD only” and Home waits — exactly like Excel.";
-    if (st.kind === "receipt" && code !== "USD") txt = "Excel needs USD payments that match the loan. " + code + " shows “USD receipt required” and Home waits — exactly like Excel.";
+    const fxMode = (model.loanMode || "usd") === "fx";
+    if (st.kind === "loan" && !fxMode && code !== "USD") txt = "This workbook's Loans sheet is the older USD-only version. With " + code + " this loan shows “Terms needed: USD only” and Home waits — exactly like that Excel file.";
+    if (st.kind === "loan" && fxMode && !cur) txt = "Pick a currency — Excel shows “Currency needed” when it is blank.";
+    if (st.kind === "receipt") {
+      const idEl = form.querySelector('[name="loanId"]');
+      const ln = idEl ? model.loans.find(function (l) { return l.id && l.id.toLowerCase() === String(idEl.value).toLowerCase(); }) : null;
+      const lc = ln ? curCode(ln.currency) : "";
+      if (ln && !ciEq(cur, ln.currency)) txt = "Must match the loan's currency (" + lc + "), or Excel shows “Currency mismatch”.";
+      else if (!fxMode && code !== "USD") txt = "This workbook's Loans sheet is the older USD-only version. " + code + " shows “USD receipt required” — exactly like that Excel file.";
+      else if (ln && fxMode && lc !== "USD" && amt != null && !Number.isNaN(amt) && Number.isFinite(rate)) txt = moneyCur(amt, lc) + " ≈ " + money(amt * fxLoanRate(model, lc)) + " (1 " + lc + " = " + Number(fxLoanRate(model, lc)).toPrecision(6) + " USD)";
+      else if (code === "USD") txt = "";
+    }
+    if (st.kind === "loan" && fxMode && cur && code !== "USD") {
+      const r = fxLoanRate(model, code);
+      txt = Number.isFinite(r) ? "Interest and Principal left are in " + code + "; Home adds it in USD at 1 " + code + " = " + Number(r).toPrecision(6) + " USD." : "No rate for " + code + " on the FX sheet — Excel shows “FX rate needed”.";
+    }
     box.textContent = txt;
     box.hidden = !txt;
+  }
+
+  function syncReceiptCurrency(form) {
+    if (!form) return;
+    const id = (form.querySelector('[name="loanId"]') || {}).value;
+    const cur = form.querySelector('[name="currency"]');
+    const lc = loanCurrencyOf(liveModel(), id);
+    if (cur && lc) {
+      if (![].some.call(cur.options, function (o) { return o.value === lc; })) { const o = document.createElement("option"); o.value = o.textContent = lc; cur.appendChild(o); }
+      cur.value = lc;
+    }
+    updateFxHint(form);
   }
 
   function rawCell(sheetName, ref) {
@@ -2786,12 +2842,16 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   function receiptFields(model) {
     const rr = model.receiptRange || {};
     return [
-      { key: "loanId", label: "Loan", type: "select", options: loanIds(model), required: true },
-      { key: "date", label: "Date received", type: "date", required: true },
+      { key: "loanId", label: "Loan ID", type: "select", options: loanIds(model), required: true },
+      { key: "date", label: "Date", type: "date", required: true },
       { key: "amount", label: "Amount", type: "money", required: true, placeholder: "0.00" },
       curField(model, rr.sheet, rr.cols && rr.cols.currency, rr.first, { blankLabel: "" }),
-      { key: "notes", label: "Note", type: "text" }
+      { key: "notes", label: "Notes", type: "text" }
     ];
+  }
+  function loanCurrencyOf(model, id) {
+    const ln = model.loans.find(function (l) { return l.id && id && l.id.toLowerCase() === String(id).toLowerCase(); });
+    return ln ? (ln.currency || "") : "";
   }
   function openReceiptForm(row) {
     const model = liveModel();
@@ -2799,10 +2859,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const vals = existing ? {
       loanId: existing.loanId, date: existing.dateISO || "", amount: existing.amount != null ? existing.amount : "",
       currency: existing.currency || "", notes: existing.notes
-    } : { loanId: loanIds(model)[0] || "", date: todayISO(), currency: "USD" };
+    } : { loanId: loanIds(model)[0] || "", date: todayISO(), currency: loanCurrencyOf(model, loanIds(model)[0]) || "USD" };
     state.sheet = { kind: "receipt", row: row || null, fields: receiptFields(model), confirmFuture: false };
-    openSheet(formSheet(existing ? "Edit payment" : "Add payment received", state.sheet.fields, vals, {
-      form: "receipt", submit: existing ? "Save changes" : "Add payment",
+    openSheet(formSheet(existing ? "Edit receipt" : "Add receipt", state.sheet.fields, vals, {
+      form: "receipt", submit: existing ? "Save changes" : "Add receipt",
       intro: existing && !existing.dateISO ? "This receipt has no date. Enter the actual date it was received." : ""
     }));
     updateFxHint(document.querySelector("#sheet form"));
@@ -2847,7 +2907,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const change = state.sheet.row
         ? { entity: "receipt", row: row, sheet: sheet, loanId: f.loanId, dateISO: f.date, amount: amt, currency: f.currency || "", notes: f.notes }
         : { entity: "receipt", action: "add", row: row, sheet: sheet, loanId: f.loanId, dateISO: f.date, amount: amt, currency: f.currency || "", notes: f.notes };
-      pushOp((state.sheet.row ? "Updated payment " : "Payment ") + money(amt) + " · " + f.loanId + " (row " + row + ")", [change], writes);
+      pushOp((state.sheet.row ? "Updated receipt " : "Receipt ") + moneyCur(amt, f.currency) + " · " + f.loanId + " (row " + row + ")", [change], writes);
     } catch (e) { showErrors(form, { amount: e.message }); }
   }
 
@@ -2861,10 +2921,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     { key: "purpose", label: "Purpose", type: "select", options: dvOptions(model, sheet, c.purpose || "C", row || 6, model.types["loans / purpose"] || []) },
     curField(model, sheet, c.currency || "D", row || 6, { blankLabel: "" }),
     { key: "opening", label: "Opening principal", type: "money", required: true },
-    { key: "apr", label: "APR %", type: "percent", required: true, hint: "Type 4 for 4%. Explicit 0 is allowed; blank is not zero." },
-    { key: "payments", label: "Number of payments", type: "number", required: true, hint: "1–360" },
-    { key: "freq", label: "Frequency", type: "select", options: ["Monthly"], blank: false },
-    { key: "start", label: "First payment month (start date)", type: "date", required: true },
+    { key: "apr", label: "Rate (APR)", type: "percent", required: true, hint: "Type 4 for 4%. Explicit 0 is allowed; blank is not zero." },
+    { key: "payments", label: "# Payments", type: "number", required: true, hint: "1–360" },
+    { key: "freq", label: "Freq", type: "select", options: ["Monthly"], blank: false },
+    { key: "start", label: "Start date", type: "date", required: true, hint: "First payment month." },
     { key: "notes", label: "Notes", type: "text" }
   ];
   }
@@ -2885,7 +2945,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const r = comp.loans.find(function (x) { return x.id && x.id === ln.id; });
     const intro = r && !r.ready && r.issues && r.issues.length ? "Needs: " + r.issues.join(", ") : "";
     openSheet(formSheet(ln.id ? "Edit loan " + ln.id : "Add loan", LOAN_FIELDS, vals, { form: "loan", submit: ln.id ? "Save loan" : "Add loan", intro: intro }) +
-      (ln.id ? '<div class="sheet-body"><button class="btn secondary" data-act="add-receipt-for" data-id="' + escapeHtml(ln.id) + '">Add payment for ' + escapeHtml(ln.id) + "</button></div>" : ""));
+      (ln.id ? '<div class="sheet-body"><button class="btn secondary" data-act="add-receipt-for" data-id="' + escapeHtml(ln.id) + '">Add receipt for ' + escapeHtml(ln.id) + "</button></div>" : ""));
     updateFxHint(document.querySelector("#sheet form"));
   }
   function submitLoan(form) {
@@ -2966,7 +3026,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           { key: "value", label: "Full value", type: "money", required: true, col: rg.cols.value, kind: "n" },
           { key: "mortgage", label: "Mortgage", type: "money", col: rg.cols.mortgage, kind: "n" },
           curField(model, rg.sheet, rg.cols.currency, rg.first),
-          { key: "includeRaw", label: "Include in net worth? (memo)", type: "select", options: dvOptions(model, rg.sheet, rg.cols.include, rg.first, ["Yes", "No"]), col: rg.cols.include, kind: "s",
+          { key: "includeRaw", label: "Include in NW?", type: "select", options: dvOptions(model, rg.sheet, rg.cols.include, rg.first, ["Yes", "No"]), col: rg.cols.include, kind: "s",
             hint: "Memo line only. Net worth uses all property equity, like Excel Home." },
           { key: "updatedISO", label: "Updated", type: "date", col: rg.cols.updated, kind: "d" },
           { key: "notes", label: "Notes", type: "text", col: rg.cols.notes, kind: "s" }
@@ -2981,7 +3041,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           { key: "name", label: "Name", type: "text", required: true, col: rg.cols.name, kind: "s" },
           { key: "type", label: "Type", type: "select", options: dvOptions(model, rg.sheet, rg.cols.type, rg.first, model.types.debts || []), col: rg.cols.type, kind: "s" },
           { key: "lender", label: "Lender", type: "text", col: rg.cols.lender, kind: "s" },
-          { key: "balance", label: "Balance owed", type: "money", required: true, col: rg.cols.balance, kind: "n" },
+          { key: "balance", label: "Balance", type: "money", required: true, col: rg.cols.balance, kind: "n" },
           curField(model, rg.sheet, rg.cols.currency, rg.first),
           { key: "updatedISO", label: "Updated", type: "date", col: rg.cols.updated, kind: "d" },
           { key: "notes", label: "Notes", type: "text", col: rg.cols.notes, kind: "s" }
@@ -3054,7 +3114,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         fields.push({ key: "dueISO", label: "Due date", type: "date", col: "D", kind: "d" });
         fields.push({ key: "paidISO", label: "Paid date", type: "date", col: "E", kind: "d" });
       } else {
-        fields.push({ key: "pays", label: "Payments per year", type: "number", col: "D", kind: "n", hint: "Excel's Yearly = Per payment × Payments per year (blank leaves it out)." });
+        fields.push({ key: "pays", label: "Pays/year", type: "number", col: "D", kind: "n", hint: "Excel's Yearly = Per payment × Payments per year (blank leaves it out)." });
       }
       fields.push(curField(model, rg.sheet, "F", rg.first));
       fields.push({ key: "notes", label: "Notes", type: "text", col: "H", kind: "s" });
@@ -3065,10 +3125,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       return {
         title: "Currency", range: rg, list: model.fx, entity: "fx",
         fields: [
-          { key: "code", label: "Currency code", type: "text", required: true, col: "A", kind: "s", placeholder: "e.g. INR", upper: true },
-          { key: "perUsd", label: "1 USD = (units)", type: "number", col: "F", kind: "n", hint: "Easiest: type how many units 1 USD buys, e.g. INR 95.80. Used first." },
-          { key: "manual", label: "Manual override (1 unit = USD)", type: "number", col: "C", kind: "n", hint: "Used when “1 USD =” is blank." },
-          { key: "live", label: "Live rate (paste, 1 unit = USD)", type: "number", col: "B", kind: "n", hint: "Used when both above are blank. Fallback column stays in Excel." }
+          { key: "code", label: "Currency", type: "text", required: true, col: "A", kind: "s", placeholder: "e.g. INR", upper: true },
+          { key: "perUsd", label: "1 USD = (type here)", type: "number", col: "F", kind: "n", hint: "Easiest: type how many units 1 USD buys, e.g. INR 95.80. Used first." },
+          { key: "manual", label: "Manual override", type: "number", col: "C", kind: "n", hint: "1 unit = this many USD. Used when “1 USD =” is blank." },
+          { key: "live", label: "Live (paste optional)", type: "number", col: "B", kind: "n", hint: "1 unit = this many USD. Used when both above are blank. Fallback (offline) stays in Excel." }
         ],
         intro: "Same order as Excel FX: 1 USD = → Manual → Live → Fallback."
       };
@@ -3313,7 +3373,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           setTimeout(function () {
             openReceiptForm(null);
             const sel = document.querySelector('#sheet [name="loanId"]');
-            if (sel) sel.value = id;
+            if (sel) { sel.value = id; syncReceiptCurrency(sel.form); }
           }, 50);
           break;
         }
@@ -3379,6 +3439,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (sheetEl) {
       sheetEl.oninput = sheetEl.onchange = function (ev) {
         const form = ev.target && ev.target.closest && ev.target.closest("form");
+        if (form && ev.type === "change" && ev.target.name === "loanId") syncReceiptCurrency(form);
         if (form) updateFxHint(form);
       };
       sheetEl.onsubmit = function (ev) {
@@ -3428,12 +3489,12 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }
     openSheet('<div class="sheet-handle"></div><div class="sheet-head"><button class="pill ghost" data-act="close-sheet">Cancel</button><h2>Add</h2><span style="width:64px"></span></div>' +
       '<div class="sheet-body" data-testid="add-sheet"><div class="list-card">' +
-      item("add-receipt", "receipts", "var(--gold)", "Add payment", "A payment you received", "add-pick-receipt") +
-      item("add-account", "assets", "var(--teal)", "Add balance", "A bank or cash account", "add-pick-account") +
-      item("add-loan", "loans", "var(--navy)", "Add loan", "Money you have lent", "add-pick-loan") +
-      item("add-property", "assets", "var(--green)", "Add property", "A home or other property", "add-pick-property") +
-      item("add-debt", "loans", "var(--coral)", "Add debt", "Money you owe", "add-pick-debt") +
-      item("add-hist", "file", "var(--blue)", "Add snapshot", "Save a net-worth snapshot", "add-pick-hist") +
+      item("add-receipt", "receipts", "var(--gold)", "Add receipt", "Receipt log · money you received", "add-pick-receipt") +
+      item("add-account", "assets", "var(--teal)", "Add account", "Accounts · balance", "add-pick-account") +
+      item("add-loan", "loans", "var(--navy)", "Add loan", "Loans & Receivables · money you lent", "add-pick-loan") +
+      item("add-property", "assets", "var(--green)", "Add property", "Properties", "add-pick-property") +
+      item("add-debt", "loans", "var(--coral)", "Add debt", "Debts · money you owe", "add-pick-debt") +
+      item("add-hist", "file", "var(--blue)", "Add snapshot", "History · balance history", "add-pick-hist") +
       "</div></div>");
   }
   function openAssetChooser() { openAddMenu(); }
