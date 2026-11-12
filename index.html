@@ -989,17 +989,23 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const sheetPaths = {};
     const dvs = {};
     let loanMode = "usd";
+    let freqMode = "monthly";
     for (const sh of sheetList) {
       if (sh.name.toLowerCase() === "app") continue;
       const xml = await zip.file(sh.path).async("string");
       sheets[sh.name] = { name: sh.name, path: sh.path, cells: parseSheetCells(xml, sst) };
       sheetPaths[sh.name] = sh.path;
       dvs[sh.name] = parseValidations(xml);
-      if (sh.name.toLowerCase() === "loans") loanMode = /FX rate needed/.test(xml) ? "fx" : "usd";
+      if (sh.name.toLowerCase() === "loans") {
+        loanMode = /FX rate needed/.test(xml) ? "fx" : "usd";
+        // Workbooks with the frequency step carry Quarterly / Yearly / Open branches in the Loans formulas.
+        freqMode = /Open \(no schedule\)/.test(xml) && /Frequency needed/.test(xml) ? "multi" : "monthly";
+      }
     }
     const parsed = extractModel(sheets);
     parsed._dv = dvs;
     parsed.loanMode = loanMode;
+    parsed.freqMode = freqMode;
     parsed._sheetPaths = sheetPaths;
     parsed._unlocked = [...unlocked];
     parsed._raw = {};
@@ -1445,6 +1451,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     return n > 1 ? n / 100 : n;
   }
 
+  const OPEN_FREQ = "Open (no schedule)";
+  function loanFreqKind(model, loan) {
+    if (model.freqMode !== "multi" || ciEq(loan.freq, "Monthly")) return "monthly";
+    if (ciEq(loan.freq, OPEN_FREQ)) return "open";
+    if (ciEq(loan.freq, "Quarterly")) return "quarterly";
+    if (ciEq(loan.freq, "Yearly")) return "yearly";
+    return "other";
+  }
   function ciEq(a, b) { return String(a == null ? "" : a).trim().toLowerCase() === String(b == null ? "" : b).trim().toLowerCase(); }
   function blankCell(v) { return v == null || String(v) === ""; }
 
@@ -1469,6 +1483,25 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     } else if (!ciEq(loan.currency, "USD")) return "USD only";
     if (!isNum(loan.opening)) return "Opening principal needed";
     if (Number(loan.opening) < 0) return "Invalid principal";
+    // Frequency workbooks: Monthly keeps the original chain below; other values use the new branch (Loans!Q).
+    if (model.freqMode === "multi" && !ciEq(loan.freq, "Monthly")) {
+      if (ciEq(loan.freq, OPEN_FREQ)) {
+        if (!blankCell(loan.apr) && !(isNum(loan.apr) && Number(loan.apr) === 0)) return "Open loan: APR must be 0 or blank";
+        if (!asOfISO) return "As-of date needed";
+        return "OK";
+      }
+      if (!isNum(loan.apr)) return "APR needed (blank is not zero)";
+      if (Number(loan.apr) < 0) return "Invalid APR";
+      if (!isNum(loan.payments)) return "Payment term needed";
+      const np = Number(loan.payments);
+      if (np < 1 || np !== Math.floor(np) || np > 360) return "Term must be 1–360 payments";
+      if (!ciEq(loan.freq, "Quarterly") && !ciEq(loan.freq, "Yearly")) return "Frequency needed";
+      if (!loan.startISO) return "First payment month needed";
+      if (!asOfISO) return "As-of date needed";
+      if (asOfISO < loan.startISO.slice(0, 8) + "01") return "As-of before first month";
+      if (monthIdx(asOfISO) - monthIdx(loan.startISO) + 1 > 360) return "360-period horizon exceeded";
+      return "OK";
+    }
     if (!isNum(loan.apr)) return "APR needed (blank is not zero)";
     if (Number(loan.apr) < 0) return "Invalid APR";
     if (!isNum(loan.payments)) return "Payment term needed";
@@ -1491,7 +1524,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (loans.filter(function (l) { return l.id && ciEq(l.id, r.loanId); }).length > 1) return out("Duplicate loan ID");
     if (r.dateRaw == null || r.dateRaw === "") return out("Date needed");
     if (!r.dateISO || (typeof r.dateRaw === "string" && !isFinite(Number(r.dateRaw)))) return out("Invalid date");
-    if (asOfISO && r.dateISO > asOfISO) return out("Future receipt date");
+    if (!asOfISO || r.dateISO > asOfISO) return out("Future receipt date"); // Excel: B > blank as-of (0) is TRUE
     if (!isNum(r.amount)) return out("Amount needed");
     if (Number(r.amount) <= 0) return out("Positive amount needed");
     if (mode !== "fx" && !ciEq(r.currency, "USD")) return out("USD receipt required");
@@ -1527,7 +1560,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         if (st === "Date needed") dateNeeded = true;
         if (st !== "OK" && st !== "Blank") out.badReceipts++;
       });
-      if (t === "OK") {
+      const kind = loanFreqKind(model, loan);
+      out.freqKind = kind;
+      if (t === "OK" && kind === "open") {
+        // Open (no schedule): Principal left = opening − receipts (Loans!R), no interest, overpayment when receipts exceed opening (Loans!Y).
+        out.principal = Math.max(0, Number(loan.opening) - out.receivedIncluded);
+        out.unpaid = 0;
+        if (out.receivedIncluded > Number(loan.opening) + 0.0000001) out.overpay = 1;
+      } else if (t === "OK") {
         const byMonth = {};
         model.receipts.forEach(function (r, k) {
           if (checks[k].status !== "OK" || !ciEq(r.loanId, loan.id)) return;
@@ -1539,7 +1579,12 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         let O = Number(loan.opening), P = 0;
         for (let k = 0; k < 360; k++) {
           const m = startM + k;
-          const Q = m <= asOfM ? O * apr / 12 : 0;
+          let Q;
+          if (kind === "monthly") Q = m <= asOfM ? O * apr / 12 : 0;
+          else if (kind === "quarterly" || kind === "yearly") {
+            const step = kind === "yearly" ? 12 : 3;
+            Q = (m <= asOfM && k % step === 0) ? O * apr / (kind === "yearly" ? 1 : 4) : 0;
+          } else Q = 0;
           const R = m > asOfM ? 0 : (byMonth[m] || 0);
           const S = Math.min(R, P + Q);
           const T = Math.min(O, Math.max(0, R - S));
@@ -2146,8 +2191,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         html += r.ready ? '<span class="chip green">Ready</span>' : '<span class="chip amber">' + escapeHtml(r.status || "Setup") + "</span>";
         html += '</div><div class="grid">';
         html += '<div><div class="f">Opening principal</div><div class="n">' + moneyCur(l.opening, l.currency) + "</div></div>";
-        html += '<div><div class="f">Rate (APR)</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
-        html += '<div><div class="f"># Payments · Freq</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
+        const isOpenLoan = model.freqMode === "multi" && ciEq(l.freq, OPEN_FREQ);
+        html += '<div><div class="f">Rate (APR)</div><div class="n">' + (isOpenLoan ? "Open — no interest" : isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
+        html += '<div><div class="f"># Payments · Freq</div><div class="n">' + (isOpenLoan ? "Open (no schedule)" : (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "")) + "</div></div>";
         html += '<div><div class="f">Start date</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
         html += '<div><div class="f">Received (auto)</div><div class="n ' + moneyClass(r.receivedIncluded) + '">' + moneyCur(r.receivedIncluded, l.currency) + "</div></div>";
         const prinTxt = r.ready ? moneyCur(r.principal, l.currency) : escapeHtml(r.status || "—");
@@ -2635,7 +2681,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       "<li>Open Excel file, add entries, Save Excel, then Replace the file in Files.</li>" +
       "<li>Use the + button to add a payment, balance, loan, or other item. Changes stay on this phone until you save.</li>" +
       "<li>After you save, open the file in Excel so locked formulas (amount left, USD totals) recalculate.</li>" +
-      "<li>Interest is charged monthly on the amount still owed (APR ÷ 12), interest first, for the as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
+      (model && model.freqMode === "multi" ? "<li>Freq: Monthly charges APR ÷ 12 each month; Quarterly APR ÷ 4 every 3 months; Yearly the full APR every 12 months — each from the first payment month, interest first, as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
+        "<li>Open (no schedule): no interest; Rate, # Payments and Start date may be blank. Principal left = opening principal − receipts, converted to USD like other loans.</li>"
+        : "<li>Interest is charged monthly on the amount still owed (APR ÷ 12), interest first, for the as-of month in full. Unpaid interest never compounds and is not in net worth.</li>") +
       "<li>Net worth = accounts + amount left on loans + all property equity − debts, once every loan is set up and every payment has a date.</li>" +
       "<li>Currencies: pick one on any account, property, debt, or cash-flow item. Amounts convert to USD with the rates in More → Currencies (same order as Excel FX). Loans & Receivables use the loan's own currency (receipts must match it); Home adds them in USD.</li>" +
       "<li>This app never sends your data to a server and does not show business identification numbers.</li>" +
@@ -2924,7 +2972,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     { key: "opening", label: "Opening principal", type: "money", required: true },
     { key: "apr", label: "Rate (APR)", type: "percent", required: true, hint: "Type 4 for 4%. Explicit 0 is allowed; blank is not zero." },
     { key: "payments", label: "# Payments", type: "number", required: true, hint: "1–360" },
-    { key: "freq", label: "Freq", type: "select", options: ["Monthly"], blank: false },
+    { key: "freq", label: "Freq", type: "select", blank: false,
+      options: model.freqMode === "multi" ? dvOptions(model, sheet, c.freq || "H", row || 6, ["Monthly", "Quarterly", "Yearly", OPEN_FREQ]) : ["Monthly"] },
     { key: "start", label: "Start date", type: "date", required: true, hint: "First payment month." },
     { key: "notes", label: "Notes", type: "text" }
   ];
@@ -2948,6 +2997,32 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     openSheet(formSheet(ln.id ? "Edit loan " + ln.id : "Add loan", LOAN_FIELDS, vals, { form: "loan", submit: ln.id ? "Save loan" : "Add loan", intro: intro,
       after: ln.id ? '<div class="sheet-actions form-extra"><button type="button" class="btn secondary" data-act="add-receipt-for" data-testid="add-receipt-for" data-id="' + escapeHtml(ln.id) + '">Add receipt for ' + escapeHtml(ln.id) + "</button></div>" : "" }));
     updateFxHint(document.querySelector("#sheet form"));
+    updateFreqUI(document.querySelector("#sheet form"));
+  }
+  /* Loan form: labels and hints follow the chosen Freq (Open = Rate, # Payments and Start date optional). */
+  function updateFreqUI(form) {
+    if (!form || !state.sheet || state.sheet.kind !== "loan") return;
+    const model = liveModel();
+    const sel = form.querySelector('[name="freq"]');
+    const fq = sel ? sel.value : "Monthly";
+    const multi = model.freqMode === "multi";
+    const isOpen = multi && ciEq(fq, OPEN_FREQ);
+    const kind = !multi || ciEq(fq, "Monthly") ? "monthly" : isOpen ? "open" : ciEq(fq, "Quarterly") ? "quarterly" : ciEq(fq, "Yearly") ? "yearly" : "other";
+    const set = function (key, label, hint) {
+      const box = form.querySelector('[data-field="' + key + '"]');
+      if (!box) return;
+      box.querySelector("label").textContent = label;
+      let h = box.querySelector(".hint:not(.fx-hint)");
+      if (!h) { h = document.createElement("div"); h.className = "hint"; box.insertBefore(h, box.querySelector(".err")); }
+      h.textContent = hint || ""; h.hidden = !hint;
+    };
+    const unit = { monthly: "months", quarterly: "quarters", yearly: "years" }[kind] || "";
+    set("apr", isOpen ? "Rate (APR) — optional" : "Rate (APR) *", isOpen ? "Open loans have no interest — leave blank or 0." : "Type 4 for 4%. Explicit 0 is allowed; blank is not zero.");
+    set("payments", isOpen ? "# Payments — optional" : "# Payments *", isOpen ? "Not used for Open loans." : "1–360" + (unit && multi ? " " + unit : ""));
+    set("start", isOpen ? "Start date — optional" : "Start date *", isOpen ? "Optional. If set, receipts before this month are flagged." : "First payment month.");
+    const fh = { monthly: multi ? "Interest APR ÷ 12 every month." : "", quarterly: "Interest APR ÷ 4 every 3 months, from the first payment month.",
+      yearly: "Interest = APR once every 12 months, from the first payment month.", open: "No interest, no schedule. Principal left = opening principal − receipts.", other: "" }[kind];
+    set("freq", "Freq", fh);
   }
   function submitLoan(form) {
     const model = liveModel();
@@ -2960,12 +3035,15 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const op = parseMoney(f.opening);
     if (op == null || Number.isNaN(op)) errs.opening = "Enter the opening principal.";
     else if (op < 0) errs.opening = "Cannot be negative.";
+    const isOpen = model.freqMode === "multi" && ciEq(f.freq, OPEN_FREQ);
     const apr = f.apr === "" ? null : Number(String(f.apr).replace(/%/g, "")) / 100;
-    if (apr == null || Number.isNaN(apr)) errs.apr = "Enter an APR (0 is allowed).";
+    if (isOpen) {
+      if (apr != null && (Number.isNaN(apr) || apr !== 0)) errs.apr = "Open loans have no interest — leave blank or 0.";
+    } else if (apr == null || Number.isNaN(apr)) errs.apr = "Enter an APR (0 is allowed).";
     else if (apr < 0) errs.apr = "Cannot be negative.";
     const n = f.payments === "" ? null : Number(f.payments);
-    if (n == null || !Number.isInteger(n) || n < 1 || n > 360) errs.payments = "Whole number 1–360.";
-    if (!f.start) errs.start = "Start date is required.";
+    if (!(isOpen && n == null) && (n == null || !Number.isInteger(n) || n < 1 || n > 360)) errs.payments = "Whole number 1–360.";
+    if (!f.start && !isOpen) errs.start = "Start date is required.";
     if (Object.keys(errs).length) { showErrors(form, errs); return; }
     if (ln.id && f.id !== ln.id && model.receipts.some(function (r) { return r.loanId === ln.id; })) {
       showErrors(form, { id: "Receipts use " + ln.id + ". Keep the same ID or update those receipts first." });
@@ -3442,6 +3520,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         const form = ev.target && ev.target.closest && ev.target.closest("form");
         if (form && ev.type === "change" && ev.target.name === "loanId") syncReceiptCurrency(form);
         if (form) updateFxHint(form);
+        if (form && ev.target.name === "freq") updateFreqUI(form);
       };
       sheetEl.onsubmit = function (ev) {
         ev.preventDefault();
