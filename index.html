@@ -985,18 +985,61 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const unlocked = parseUnlockedXfs(stylesXml);
     const sheets = {};
     const sheetPaths = {};
+    const dvs = {};
     for (const sh of sheetList) {
       if (sh.name.toLowerCase() === "app") continue;
       const xml = await zip.file(sh.path).async("string");
       sheets[sh.name] = { name: sh.name, path: sh.path, cells: parseSheetCells(xml, sst) };
       sheetPaths[sh.name] = sh.path;
+      dvs[sh.name] = parseValidations(xml);
     }
     const parsed = extractModel(sheets);
+    parsed._dv = dvs;
     parsed._sheetPaths = sheetPaths;
     parsed._unlocked = [...unlocked];
     parsed._raw = {};
     Object.keys(sheets).forEach(function (nm) { parsed._raw[nm] = { cells: sheets[nm].cells }; });
     return parsed;
+  }
+
+  /* Excel dropdowns: standard and x14 list validations. */
+  function parseValidations(xml) {
+    const out = [];
+    function addOne(f1, sq) {
+      if (!f1 || !sq) return;
+      f1 = decodeXml(f1).trim();
+      let src = null;
+      const lit = f1.match(/^"([\s\S]*)"$/);
+      if (lit) src = { list: lit[1].split(",").map(function (x) { return x.trim(); }).filter(Boolean) };
+      else {
+        const m = f1.replace(/^=/, "").match(/^'?([^'!]+)'?!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)$/);
+        if (m) src = { sheet: m[1], col: m[2], r1: +m[3], r2: +m[5] };
+      }
+      if (!src) return;
+      const ranges = [];
+      sq.trim().split(/\s+/).forEach(function (part) {
+        const mm = part.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/);
+        if (!mm) return;
+        ranges.push({ c1: colNum(mm[1]), r1: +mm[2], c2: colNum(mm[3] || mm[1]), r2: +(mm[4] || mm[2]) });
+      });
+      if (ranges.length) out.push({ src: src, ranges: ranges });
+    }
+    let m;
+    const reStd = /<dataValidation\b([^>]*)>([\s\S]*?)<\/dataValidation>/g;
+    while ((m = reStd.exec(xml))) {
+      if (!/type="list"/.test(m[1])) continue;
+      const sq = (m[1].match(/sqref="([^"]+)"/) || [])[1];
+      const f1 = (m[2].match(/<formula1>([\s\S]*?)<\/formula1>/) || [])[1];
+      addOne(f1, sq);
+    }
+    const reX = /<x14:dataValidation\b([^>]*)>([\s\S]*?)<\/x14:dataValidation>/g;
+    while ((m = reX.exec(xml))) {
+      if (!/type="list"/.test(m[1])) continue;
+      const f1 = (m[2].match(/<x14:formula1>\s*<xm:f>([\s\S]*?)<\/xm:f>/) || [])[1];
+      const sq = (m[2].match(/<xm:sqref>([\s\S]*?)<\/xm:sqref>/) || [])[1];
+      addOne(f1, sq);
+    }
+    return out;
   }
 
   function sh(sheets, n) {
@@ -1039,6 +1082,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const cSt = colOf(h, ["start date", "start"]) || "I";
       const cRv = colOf(h, ["received"]) || "J";
       const cK = colOf(h, ["principal left"]) || "K";
+      const cNt = colOf(h, ["notes"]) || "L";
       for (let r = 6; r <= 30; r++) {
         const idv = cell(loans, cId + r);
         const slot = r - 5;
@@ -1053,11 +1097,12 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           payments: num(cell(loans, cN + r)),
           freq: cell(loans, cFq + r) || "",
           startISO: parseDateCell(cell(loans, cSt + r)),
+          notes: cell(loans, cNt + r) || "",
           receivedCached: num(cell(loans, cRv + r)),
           principalCached: cell(loans, cK + r),
           unpaidCached: num(cell(loans, "S" + (9 + slot))),
           statusCached: cell(loans, "W" + (9 + slot)),
-          cols: { id: cId, borrower: cBor, purpose: cPur, currency: cCur, opening: cOp, apr: cApr, payments: cN, freq: cFq, start: cSt, received: cRv, principal: cK },
+          cols: { id: cId, borrower: cBor, purpose: cPur, currency: cCur, opening: cOp, apr: cApr, payments: cN, freq: cFq, start: cSt, received: cRv, principal: cK, notes: cNt },
           sheet: loans.name
         });
       }
@@ -1083,7 +1128,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         model.receipts.push({
           row: r, loanId: idv != null ? String(idv).trim() : "",
           dateISO: parseDateCell(dt), amount: num(am),
-          currency: cu || "USD", notes: nt || "",
+          currency: cu == null ? "" : String(cu), notes: nt || "",
+          dateRaw: dt == null ? null : dt, amountRaw: am == null ? null : am,
           sheet: loans.name
         });
       }
@@ -1107,7 +1153,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         model.debts.push({
           row: r, name: nm || "", type: cell(loans, dCols.type + r) || "",
           lender: cell(loans, dCols.lender + r) || "",
-          balance: num(bal), currency: cell(loans, dCols.currency + r) || "USD",
+          balance: num(bal), currency: cell(loans, dCols.currency + r) || "",
           usdCached: num(cell(loans, dCols.usd + r)),
           updatedISO: parseDateCell(cell(loans, dCols.updated + r)),
           notes: cell(loans, dCols.notes + r) || "",
@@ -1134,7 +1180,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         if ((nm == null || nm === "") && (ty == null || ty === "") && !isNum(bal)) continue;
         model.accounts.push({
           row: r, name: nm || "", type: ty || "", balance: num(bal),
-          currency: cell(accounts, cols.currency + r) || "USD",
+          currency: cell(accounts, cols.currency + r) || "",
           usdCached: num(cell(accounts, cols.usd + r)),
           updatedISO: parseDateCell(cell(accounts, cols.updated + r)),
           notes: cell(accounts, cols.notes + r) || "",
@@ -1165,9 +1211,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           owner: cell(props, cols.owner + r) || "",
           value: num(val), mortgage: num(cell(props, cols.mortgage + r)) || 0,
           equityCached: num(cell(props, cols.equity + r)),
-          currency: cell(props, cols.currency + r) || "USD",
-          include: String(inc || "Yes").toLowerCase() !== "no",
-          includeRaw: inc || "Yes",
+          currency: cell(props, cols.currency + r) || "",
+          include: String(inc == null ? "" : inc).trim().toLowerCase() === "yes",
+          includeRaw: inc == null ? "" : String(inc),
+          updatedISO: parseDateCell(cell(props, cols.updated + r)),
           notes: cell(props, cols.notes + r) || "",
           usdCached: num(cell(props, cols.usd + r)),
           sheet: props.name
@@ -1178,6 +1225,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }
 
     if (fx) {
+      model.fxRange = { sheet: fx.name, first: 7, last: 40 };
       for (let r = 7; r <= 40; r++) {
         const code = cell(fx, "A" + r);
         if (!code) continue;
@@ -1240,7 +1288,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           phone: cell(biz, "I" + r) || "", email: cell(biz, "J" + r) || "",
           state: cell(biz, "K" + r) || "", formedISO: parseDateCell(cell(biz, "L" + r)),
           address: cell(biz, "M" + r) || "", city: cell(biz, "N" + r) || "",
-          st: cell(biz, "O" + r) || "", zip: cell(biz, "P" + r) || "",
+          st: cell(biz, "O" + r) || "", zip: cell(biz, "P" + r) == null ? "" : String(cell(biz, "P" + r)),
           sheet: biz.name
         });
       }
@@ -1267,10 +1315,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           rows.push({
             row: r, kind: kind, name: nm || "", category: cell(cashflow, "B" + r) || "",
             amount: num(am), pays: num(cell(cashflow, "D" + r)),
-            currency: cell(cashflow, "F" + r) || "USD",
+            currency: cell(cashflow, "F" + r) || "",
             notes: cell(cashflow, "H" + r) || "",
             dueISO: kind === "bills" ? parseDateCell(cell(cashflow, "D" + r)) : null,
             paidISO: kind === "bills" ? parseDateCell(cell(cashflow, "E" + r)) : null,
+            paidRaw: kind === "bills" ? (cell(cashflow, "E" + r) == null ? null : cell(cashflow, "E" + r)) : null,
             sheet: cashflow.name
           });
         }
@@ -1296,6 +1345,18 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         }
         model.types[label] = list;
       });
+      model.typesSheet = types.name;
+      model.typeCols = [];
+      ["A", "B", "C", "D", "E", "F", "G"].forEach(function (c) {
+        const label = cell(types, c + "4");
+        if (!label) return;
+        const items = [];
+        for (let r = 5; r <= 79; r++) {
+          const v = cell(types, c + r);
+          if (v != null && String(v).trim() !== "") items.push({ row: r, value: String(v) });
+        }
+        model.typeCols.push({ col: c, label: String(label), items: items });
+      });
     }
 
     if (guide) {
@@ -1318,16 +1379,58 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     return model;
   }
 
-  function fxRate(model, code) {
-    if (!code || String(code).toUpperCase() === "USD") return 1;
-    const row = (model.fx || []).find(function (r) { return String(r.code).toUpperCase() === String(code).toUpperCase(); });
-    if (!row) return 1;
-    if (isNum(row.manual)) return Number(row.manual);
+  /* FX — same order as FX!D: "1 USD =" (F) → Manual (C) → Live (B) → Fallback (G). */
+  function fxEffective(row) {
+    if (!row || !row.code) return null;
     if (isNum(row.perUsd) && Number(row.perUsd) !== 0) return 1 / Number(row.perUsd);
+    if (isNum(row.manual)) return Number(row.manual);
     if (isNum(row.live)) return Number(row.live);
     if (isNum(row.fallback)) return Number(row.fallback);
-    if (isNum(row.effectiveCached)) return Number(row.effectiveCached);
-    return 1;
+    return null;
+  }
+  function fxStatus(row) {
+    if (!row || !row.code) return "";
+    if (isNum(row.perUsd) && Number(row.perUsd) !== 0) return "From 1 USD =";
+    if (isNum(row.manual)) return "Manual override";
+    if (isNum(row.live)) return "Pasted live";
+    if (isNum(row.fallback)) return "Fallback (offline)";
+    return "No rate";
+  }
+  function fxRow(model, code) {
+    const c = String(code == null ? "" : code).trim().toUpperCase();
+    return (model.fx || []).find(function (r) { return String(r.code).trim().toUpperCase() === c; }) || null;
+  }
+  // VLOOKUP(code, FX!A7:D40, 4) wrapped in IFERROR(…, 1): unknown code → 1; known code with no rate → error (NaN).
+  function fxLookup(model, code) {
+    const row = fxRow(model, code);
+    if (!row) return 1;
+    const e = fxEffective(row);
+    return e == null ? NaN : e;
+  }
+  // Properties / Debts / Cashflow: blank currency → "USD", then look it up on FX.
+  function fxRate(model, code) {
+    const c = code == null || String(code).trim() === "" ? "USD" : code;
+    return fxLookup(model, c);
+  }
+  // Accounts: blank or USD → 1 without looking at FX.
+  function fxRateAccount(model, code) {
+    if (code == null || String(code).trim() === "" || String(code).trim().toUpperCase() === "USD") return 1;
+    return fxLookup(model, code);
+  }
+  function curCode(code) {
+    const c = String(code == null ? "" : code).trim().toUpperCase();
+    return c || "USD";
+  }
+  function moneyCur(n, code) {
+    if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
+    const c = curCode(code);
+    if (c === "USD") return money(n);
+    try {
+      const t = new Intl.NumberFormat("en-US", { style: "currency", currency: c, currencyDisplay: "narrowSymbol", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n));
+      return t.indexOf(c) >= 0 ? t.replace(/\u00a0/g, " ") : t + " " + c;
+    } catch (e) {
+      return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + c;
+    }
   }
 
   function parseAprInput(s) {
@@ -1337,153 +1440,172 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     return n > 1 ? n / 100 : n;
   }
 
-  function computeLoan(loan, receipts, asOfISO) {
-    const out = {
-      id: loan.id, ready: false, inactive: false, status: "",
-      issues: [], principal: null, unpaid: 0, received: 0,
-      receivedIncluded: 0, opening: loan.opening
-    };
-    const filled = !!(loan.id || isNum(loan.opening) || isNum(loan.apr) || isNum(loan.payments) || loan.freq || loan.startISO);
-    if (!loan.id && !filled) {
-      out.inactive = true;
-      out.status = "Inactive";
-      return out;
-    }
-    if (!loan.id) out.issues.push("Loan ID needed");
-    if (!isNum(loan.opening) || Number(loan.opening) < 0) out.issues.push("Opening principal needed");
-    if (loan.apr == null || loan.apr === "" || !isFinite(Number(loan.apr)) || Number(loan.apr) < 0) {
-      out.issues.push("APR needed (blank is not zero)");
-    }
-    if (!isNum(loan.payments) || !Number.isInteger(Number(loan.payments)) || Number(loan.payments) < 1 || Number(loan.payments) > 360) {
-      out.issues.push("Payment term needed");
-    }
-    if (!loan.freq || String(loan.freq).toLowerCase() !== "monthly") out.issues.push("Monthly frequency needed");
-    if (!loan.startISO) out.issues.push("Start date needed");
-    if (loan.currency && String(loan.currency).toUpperCase() !== "USD") out.issues.push("USD only");
+  function ciEq(a, b) { return String(a == null ? "" : a).trim().toLowerCase() === String(b == null ? "" : b).trim().toLowerCase(); }
+  function blankCell(v) { return v == null || String(v) === ""; }
 
-    const mine = (receipts || []).filter(function (r) { return r.loanId && loan.id && r.loanId === loan.id; });
-    const undated = mine.filter(function (r) { return isNum(r.amount) && !r.dateISO; });
-    if (undated.length) out.issues.push(STATUS_DATE);
-    out.received = mine.reduce(function (s, r) { return s + (isNum(r.amount) ? Number(r.amount) : 0); }, 0);
+  /* Port of Loans!Q (terms check), JZ (receipt check), backend amortization and W (status). */
+  function loanTerms(loan, loans, asOfISO) {
+    const filled = !!(!blankCell(loan.id) || !blankCell(loan.borrower) || !blankCell(loan.purpose) || !blankCell(loan.currency) ||
+      isNum(loan.opening) || !blankCell(loan.apr) || !blankCell(loan.payments) || !blankCell(loan.freq) || loan.startISO);
+    if (!filled) return "Inactive";
+    if (blankCell(loan.id)) return "Loan ID needed";
+    if (loans.filter(function (l) { return l.id && ciEq(l.id, loan.id); }).length > 1) return "Duplicate loan ID";
+    if (!ciEq(loan.currency, "USD")) return "USD only";
+    if (!isNum(loan.opening)) return "Opening principal needed";
+    if (Number(loan.opening) < 0) return "Invalid principal";
+    if (!isNum(loan.apr)) return "APR needed (blank is not zero)";
+    if (Number(loan.apr) < 0) return "Invalid APR";
+    if (!isNum(loan.payments)) return "Payment term needed";
+    const n = Number(loan.payments);
+    if (n < 1 || n !== Math.floor(n) || n > 360) return "Term must be 1–360 months";
+    if (!ciEq(loan.freq, "Monthly")) return "Monthly frequency needed";
+    if (!loan.startISO) return "First payment month needed";
+    if (!asOfISO) return "As-of date needed";
+    if (asOfISO < loan.startISO.slice(0, 8) + "01") return "As-of before first month";
+    if (monthIdx(asOfISO) - monthIdx(loan.startISO) + 1 > 360) return "360-period horizon exceeded";
+    return "OK";
+  }
+  function receiptCheck(r, loans, terms, asOfISO) {
+    const any = !blankCell(r.loanId) || r.dateRaw != null && r.dateRaw !== "" || r.dateISO || (r.amountRaw != null && r.amountRaw !== "") || isNum(r.amount) || !blankCell(r.currency) || !blankCell(r.notes);
+    if (!any) return { status: "Blank", slot: -1 };
+    if (blankCell(r.loanId)) return { status: "Loan ID needed", slot: -1 };
+    const slot = loans.findIndex(function (l) { return l.id && ciEq(l.id, r.loanId); });
+    if (slot < 0) return { status: "Unknown loan ID", slot: -1 };
+    const out = function (s) { return { status: s, slot: slot }; };
+    if (loans.filter(function (l) { return l.id && ciEq(l.id, r.loanId); }).length > 1) return out("Duplicate loan ID");
+    if (r.dateRaw == null || r.dateRaw === "") return out("Date needed");
+    if (!r.dateISO || (typeof r.dateRaw === "string" && !isFinite(Number(r.dateRaw)))) return out("Invalid date");
+    if (asOfISO && r.dateISO > asOfISO) return out("Future receipt date");
+    if (!isNum(r.amount)) return out("Amount needed");
+    if (Number(r.amount) <= 0) return out("Positive amount needed");
+    if (!ciEq(r.currency, "USD")) return out("USD receipt required");
+    if (!ciEq(r.currency, loans[slot].currency)) return out("Currency mismatch");
+    if (terms[slot] !== "OK") return out("Loan terms needed");
+    if (monthIdx(r.dateISO) < monthIdx(loans[slot].startISO)) return out("Before first payment month");
+    return out("OK");
+  }
 
-    if (out.issues.length) {
-      out.status = undated.length ? STATUS_DATE : STATUS_INCOMPLETE;
-      out.ready = false;
-      return out;
-    }
-
-    const asOfM = monthIdx(asOfISO);
-    const startM = monthIdx(loan.startISO);
-    if (asOfM == null || startM == null || asOfM < startM) {
-      // before first month: principal = opening, unpaid 0, no charges yet
-      out.principal = Number(loan.opening);
-      out.unpaid = 0;
-      out.ready = true;
-      out.status = "Ready";
-      return out;
-    }
-    if (asOfM - startM + 1 > 360) {
-      out.issues.push("Exceeds 360 periods");
-      out.status = STATUS_INCOMPLETE;
-      return out;
-    }
-
-    let principal = Number(loan.opening);
-    let unpaid = 0;
-    const apr = Number(loan.apr);
-    const byMonth = {};
-    mine.forEach(function (r) {
-      if (!r.dateISO || !isNum(r.amount)) return;
-      const mi = monthIdx(r.dateISO);
-      if (mi == null) return;
-      if (asOfISO && r.dateISO > asOfISO) return; // future vs as-of excluded from J and amortization
-      byMonth[mi] = (byMonth[mi] || 0) + Number(r.amount);
-      out.receivedIncluded += Number(r.amount);
-    });
-    for (let m = startM; m <= asOfM; m++) {
-      if (principal > 0) unpaid += principal * apr / 12;
-      const rec = byMonth[m] || 0;
-      if (rec > 0) {
-        if (rec <= unpaid) {
-          unpaid -= rec;
-        } else {
-          const toPrin = rec - unpaid;
-          unpaid = 0;
-          principal = Math.max(0, principal - toPrin);
+  function computeLoans(model) {
+    const asOf = model.asOfISO;
+    const loans = model.loans;
+    const terms = loans.map(function (l) { return loanTerms(l, loans, asOf); });
+    const checks = model.receipts.map(function (r) { return receiptCheck(r, loans, terms, asOf); });
+    model.receipts.forEach(function (r, i) { r._check = checks[i].status; });
+    const asOfM = monthIdx(asOf);
+    const results = loans.map(function (loan, i) {
+      const t = terms[i];
+      const out = { id: loan.id, row: loan.row, ready: false, inactive: t === "Inactive", status: "", terms: t,
+        issues: [], principal: null, unpaid: 0, received: 0, receivedIncluded: 0, opening: loan.opening, overpay: 0, badReceipts: 0 };
+      if (out.inactive) { out.status = "Inactive"; return out; }
+      // J: every receipt with this ID minus those dated after the as-of date (SUMIF semantics).
+      model.receipts.forEach(function (r) {
+        if (!loan.id || !ciEq(r.loanId, loan.id) || !isNum(r.amount)) return;
+        out.received += Number(r.amount);
+        if (!(asOf && r.dateISO && r.dateISO > asOf)) out.receivedIncluded += Number(r.amount);
+      });
+      let dateNeeded = false;
+      model.receipts.forEach(function (r, k) {
+        if (!loan.id || !ciEq(r.loanId, loan.id)) return;
+        const st = checks[k].status;
+        if (st === "Date needed") dateNeeded = true;
+        if (st !== "OK" && st !== "Blank") out.badReceipts++;
+      });
+      if (t === "OK") {
+        const byMonth = {};
+        model.receipts.forEach(function (r, k) {
+          if (checks[k].status !== "OK" || !ciEq(r.loanId, loan.id)) return;
+          const mi = monthIdx(r.dateISO);
+          byMonth[mi] = (byMonth[mi] || 0) + Number(r.amount);
+        });
+        const startM = monthIdx(loan.startISO);
+        const apr = Number(loan.apr);
+        let O = Number(loan.opening), P = 0;
+        for (let k = 0; k < 360; k++) {
+          const m = startM + k;
+          const Q = m <= asOfM ? O * apr / 12 : 0;
+          const R = m > asOfM ? 0 : (byMonth[m] || 0);
+          const S = Math.min(R, P + Q);
+          const T = Math.min(O, Math.max(0, R - S));
+          if (R > O + P + Q + 0.0000001) out.overpay++;
+          O = Math.max(0, O - T);
+          P = Math.max(0, P + Q - S);
         }
+        out.principal = O;
+        out.unpaid = P;
       }
-    }
-    out.principal = principal;
-    out.unpaid = unpaid;
-    out.ready = true;
-    out.status = "Ready";
-    return out;
+      let w;
+      if (dateNeeded) w = "Date needed";
+      else if (t !== "OK") w = "Terms needed: " + t;
+      else if (out.badReceipts > 0) w = "Receipt needs review";
+      else if (out.overpay > 0) w = "Overpayment — review";
+      else w = "Ready";
+      out.status = w;
+      out.ready = w === "Ready";
+      if (!out.ready) {
+        if (t !== "OK") out.issues.push(t);
+        if (dateNeeded) out.issues.push("A payment needs a date");
+        else if (out.badReceipts > 0) {
+          model.receipts.forEach(function (r, k) {
+            if (ciEq(r.loanId, loan.id) && checks[k].status !== "OK" && checks[k].status !== "Blank" && out.issues.indexOf(checks[k].status) < 0) out.issues.push(checks[k].status);
+          });
+        }
+        if (out.overpay > 0) out.issues.push("Overpayment — review");
+      }
+      if (!out.ready) { out.principal = null; out.unpaid = 0; }
+      return out;
+    });
+    const receiptsOk = checks.every(function (c) { return c.status === "OK" || c.status === "Blank"; });
+    return { results: results, checks: checks, receiptsOk: receiptsOk };
   }
 
   function computeAll(model) {
     const asOf = model.asOfISO;
-    const loanResults = model.loans.map(function (ln) { return computeLoan(ln, model.receipts, asOf); });
-    const receiptsOk = model.receipts.every(function (r) {
-      if (!r.loanId && !isNum(r.amount) && !r.dateISO) return true;
-      if (!r.loanId) return false;
-      if (isNum(r.amount) && !r.dateISO) return false;
-      return true;
-    });
+    const lc = computeLoans(model);
+    const loanResults = lc.results;
     const loansReady = loanResults.every(function (r) { return r.inactive || r.ready; });
-    const complete = loansReady && receiptsOk;
+    const complete = loansReady && lc.receiptsOk;
     const statusText = complete ? "Ready" : STATUS_INCOMPLETE;
+    const sum = function (list, fn) { return list.reduce(function (s, x) { const v = fn(x); return v == null ? s : s + v; }, 0); };
 
-    const accountsUsd = model.accounts.reduce(function (s, a) {
-      if (!isNum(a.balance)) return s;
-      return s + Number(a.balance) * fxRate(model, a.currency);
-    }, 0);
+    // Accounts!E = IF(C="","",C*rate)
+    const accountsUsd = sum(model.accounts, function (a) { return isNum(a.balance) ? Number(a.balance) * fxRateAccount(model, a.currency) : null; });
+    // Properties!K = IF(D="","",(D-E)*rate)
     function propertyEquityUsd(p) {
-      if (!isNum(p.value)) return 0;
-      const eq = Number(p.value) - (isNum(p.mortgage) ? Number(p.mortgage) : 0);
-      return eq * fxRate(model, p.currency);
+      if (!isNum(p.value)) return null;
+      return (Number(p.value) - (isNum(p.mortgage) ? Number(p.mortgage) : 0)) * fxRate(model, p.currency);
     }
-    const equityYes = model.properties.reduce(function (s, p) {
-      if (!p.include) return s;
-      return s + propertyEquityUsd(p);
-    }, 0);
-    const equityAll = model.properties.reduce(function (s, p) {
-      return s + propertyEquityUsd(p);
-    }, 0);
-    const debtsUsd = model.debts.reduce(function (s, d) {
-      if (!isNum(d.balance)) return s;
-      return s + Number(d.balance) * fxRate(model, d.currency);
-    }, 0);
-    const recvPrin = loanResults.reduce(function (s, r) {
-      if (r.inactive) return s;
-      if (r.ready && isNum(r.principal)) return s + r.principal;
-      return s;
-    }, 0);
-    const unpaid = loanResults.reduce(function (s, r) { return s + (r.ready ? r.unpaid : 0); }, 0);
-    const active = loanResults.filter(function (r) { return !r.inactive && r.id; }).length;
-    const nw = complete ? (accountsUsd + recvPrin + equityAll - debtsUsd) : null;
-    const assets = complete ? (accountsUsd + recvPrin + equityAll) : null;
+    const equityYes = sum(model.properties, function (p) { return p.include ? propertyEquityUsd(p) : null; });
+    const equityAll = sum(model.properties, propertyEquityUsd);
+    // Loans!F (debts) = IF(OR(A="",D=""),"",D*rate)
+    const debtsUsd = sum(model.debts, function (d) { return (!blankCell(d.name) && isNum(d.balance)) ? Number(d.balance) * fxRate(model, d.currency) : null; });
+    const recvPrin = sum(loanResults, function (r) { return r.ready && isNum(r.principal) ? r.principal : null; });
+    const unpaid = sum(loanResults, function (r) { return r.ready ? r.unpaid : null; });
+    const active = loanResults.filter(function (r) { return !r.inactive; }).length;
+    // Home wraps each part in IFERROR(…, 0): a part showing #VALUE! (currency with no rate) counts as 0.
+    const z = function (v) { return Number.isFinite(v) ? v : 0; };
+    const nw = complete ? (z(accountsUsd) + recvPrin + z(equityAll) - z(debtsUsd)) : null;
+    const assets = complete ? (z(accountsUsd) + recvPrin + z(equityAll)) : null;
+    const fxErrors = [];
+    const noRate = (model.fx || []).filter(function (r) { return fxEffective(r) == null; }).map(function (r) { return r.code; });
+    if (!Number.isFinite(accountsUsd)) fxErrors.push("Accounts");
+    if (!Number.isFinite(equityAll)) fxErrors.push("Property equity");
+    if (!Number.isFinite(debtsUsd)) fxErrors.push("Debts");
 
-    // Cashflow simple yearly / open bills
-    const incomeYr = model.cashflow.income.reduce(function (s, r) {
-      if (!isNum(r.amount)) return s;
-      const pays = isNum(r.pays) ? Number(r.pays) : 1;
-      return s + Number(r.amount) * pays * fxRate(model, r.currency);
-    }, 0);
-    const expYr = model.cashflow.expenses.reduce(function (s, r) {
-      if (!isNum(r.amount)) return s;
-      const pays = isNum(r.pays) ? Number(r.pays) : 1;
-      return s + Number(r.amount) * pays * fxRate(model, r.currency);
-    }, 0);
-    const openBills = model.cashflow.bills.reduce(function (s, r) {
-      if (!isNum(r.amount) || r.paidISO) return s;
-      return s + Number(r.amount) * fxRate(model, r.currency);
-    }, 0);
+    // Cashflow!G: Yearly = IF(OR(C="",D=""),"",C*D); bills: IF(OR(A="",C=""),"",IF(E<>"","",C*rate))
+    const yearly = function (r) { return (isNum(r.amount) && isNum(r.pays)) ? Number(r.amount) * Number(r.pays) : null; };
+    const incomeYr = sum(model.cashflow.income, function (r) { const y = yearly(r); return y == null ? null : y * fxRate(model, r.currency); });
+    const expYr = sum(model.cashflow.expenses, function (r) { const y = yearly(r); return y == null ? null : y * fxRate(model, r.currency); });
+    const openBills = sum(model.cashflow.bills, function (r) {
+      if (blankCell(r.name) || !isNum(r.amount) || r.paidISO || (r.paidRaw != null && r.paidRaw !== "")) return null;
+      return Number(r.amount) * fxRate(model, r.currency);
+    });
 
     return {
-      asOfISO: asOf, complete: complete, status: statusText, loans: loanResults,
+      asOfISO: asOf, complete: complete, status: statusText, loans: loanResults, receiptChecks: lc.checks,
       accountsUsd: accountsUsd, equityYes: equityYes, equityAll: equityAll, debtsUsd: debtsUsd,
       recvPrin: complete ? recvPrin : null, unpaid: unpaid, active: active,
-      nw: nw, assets: assets, incomeYr: incomeYr, expYr: expYr, openBills: openBills
+      nw: nw, assets: assets, incomeYr: incomeYr, expYr: expYr, openBills: openBills,
+      fxErrors: fxErrors, noRate: noRate
     };
   }
 
@@ -1502,14 +1624,15 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       if (ch.action === "add") {
         m.receipts.push({
           row: ch.row, loanId: ch.loanId, dateISO: ch.dateISO, amount: ch.amount,
-          currency: ch.currency || "USD", notes: ch.notes || "", sheet: ch.sheet, _new: true
+          currency: ch.currency == null ? "" : ch.currency, notes: ch.notes || "", sheet: ch.sheet, _new: true,
+          dateRaw: ch.dateISO ? isoToSerial(ch.dateISO) : null, amountRaw: ch.amount
         });
       } else {
         const r = m.receipts.find(function (x) { return x.row === ch.row && x.sheet === ch.sheet; });
         if (r) {
           if (ch.loanId != null) r.loanId = ch.loanId;
-          if (ch.dateISO !== undefined) r.dateISO = ch.dateISO;
-          if (ch.amount !== undefined) r.amount = ch.amount;
+          if (ch.dateISO !== undefined) { r.dateISO = ch.dateISO; r.dateRaw = ch.dateISO ? isoToSerial(ch.dateISO) : null; }
+          if (ch.amount !== undefined) { r.amount = ch.amount; r.amountRaw = ch.amount; }
           if (ch.currency != null) r.currency = ch.currency;
           if (ch.notes != null) r.notes = ch.notes;
         }
@@ -1519,7 +1642,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (ch.entity === "loan") {
       const ln = m.loans.find(function (x) { return x.row === ch.row; });
       if (ln) {
-        ["id", "borrower", "purpose", "currency", "opening", "apr", "payments", "freq", "startISO"].forEach(function (k) {
+        ["id", "borrower", "purpose", "currency", "opening", "apr", "payments", "freq", "startISO", "notes"].forEach(function (k) {
           if (ch[k] !== undefined) ln[k] = ch[k];
         });
       }
@@ -1583,8 +1706,21 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       return;
     }
     if (ch.entity === "fx") {
-      const a = m.fx.find(function (x) { return x.row === ch.row; });
-      if (a) Object.keys(ch.fields || {}).forEach(function (k) { a[k] = ch.fields[k]; });
+      if (ch.action === "add") { m.fx.push(Object.assign({ live: null, manual: null, perUsd: null, fallback: null }, ch.rowObj)); m.fx.sort(function (x, y) { return x.row - y.row; }); }
+      else {
+        const a = m.fx.find(function (x) { return x.row === ch.row; });
+        if (a) Object.keys(ch.fields || {}).forEach(function (k) { a[k] = ch.fields[k]; });
+      }
+      m.fx = m.fx.filter(function (x) { return x.code != null && String(x.code).trim() !== ""; });
+      return;
+    }
+    if (ch.entity === "types") {
+      const tc = (m.typeCols || []).find(function (x) { return x.col === ch.list; });
+      if (tc) {
+        if (ch.action === "add") tc.items.push({ row: ch.row, value: ch.rowObj.value });
+        else { const it = tc.items.find(function (x) { return x.row === ch.row; }); if (it) it.value = ch.fields.value; }
+        tc.items = tc.items.filter(function (x) { return x.value != null && String(x.value).trim() !== ""; }).sort(function (x, y) { return x.row - y.row; });
+      }
     }
   }
 
@@ -1904,7 +2040,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     }
     if (!comp.complete) {
       html += '<div class="banner amber" data-testid="status-banner"><span class="title">' + escapeHtml(STATUS_INCOMPLETE) +
-        "</span>A loan is missing details, or a payment has no date. Net worth shows once that is fixed, just like Excel.</div>";
+        "</span>A loan or payment needs attention (Excel status: Setup / receipts incomplete). Net worth shows once that is fixed, just like Excel.</div>";
+    }
+    if (comp.fxErrors && comp.fxErrors.length) {
+      html += '<div class="banner red" data-testid="fx-error-banner">' + escapeHtml(comp.fxErrors.join(", ")) + " uses a currency with no rate (" +
+        escapeHtml((comp.noRate || []).join(", ")) + "). Excel shows #VALUE! there and leaves it out of net worth. Add a rate in More → Currencies.</div>";
     }
     if (state.mismatch && state.mismatch.length && !state.pending.length) {
       html += '<div class="banner red">Some Excel totals do not match the app yet. Open the saved file in Excel so formulas recalculate, then reload.</div>';
@@ -1974,14 +2114,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         const r = comp.loans.find(function (x) { return x.id === l.id; }) || {};
         html += '<button class="card loan-card pressable' + (r.ready ? "" : " amber-edge") + '" data-act="edit-loan" data-row="' + l.row + '" data-testid="loan-card-' + escapeHtml(l.id) + '">';
         html += '<div class="top"><div><h3>' + escapeHtml(l.id) + "</h3><div class=\"meta muted\">" + escapeHtml(l.borrower || "") +
-          (l.purpose ? " · " + escapeHtml(l.purpose) : "") + "</div></div>";
+          (l.purpose ? " · " + escapeHtml(l.purpose) : "") + (curCode(l.currency) !== "USD" ? " · " + escapeHtml(curCode(l.currency)) : "") + "</div></div>";
         html += r.ready ? '<span class="chip green">Ready</span>' : '<span class="chip amber">' + escapeHtml(r.status || "Setup") + "</span>";
         html += '</div><div class="grid">';
-        html += '<div><div class="f">Started with</div><div class="n">' + money(l.opening) + "</div></div>";
+        html += '<div><div class="f">Started with</div><div class="n">' + moneyCur(l.opening, l.currency) + "</div></div>";
         html += '<div><div class="f">APR</div><div class="n">' + (isNum(l.apr) ? (Number(l.apr) * 100).toFixed(2) + "%" : "—") + "</div></div>";
         html += '<div><div class="f">Payments</div><div class="n">' + (l.payments != null ? escapeHtml(String(l.payments)) : "—") + (l.freq ? " · " + escapeHtml(l.freq) : "") + "</div></div>";
         html += '<div><div class="f">Start date</div><div class="n">' + escapeHtml(l.startISO || "—") + "</div></div>";
-        html += '<div><div class="f">Received so far</div><div class="n ' + moneyClass(r.received) + '">' + money(r.received) + "</div></div>";
+        html += '<div><div class="f">Received so far</div><div class="n ' + moneyClass(r.receivedIncluded) + '">' + money(r.receivedIncluded) + "</div></div>";
         const prinTxt = r.ready ? money(r.principal) : escapeHtml(r.status || "—");
         const prinAttr = "";
         html += '<div><div class="f">Amount left</div><div class="n ' + (r.ready ? moneyClass(r.principal) : "") + '"' + prinAttr + ">" + prinTxt + "</div></div>";
@@ -2046,10 +2186,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         page.rows.forEach(function (r) {
           const warn = isNum(r.amount) && !r.dateISO;
           html += '<button class="row" data-act="edit-receipt" data-row="' + r.row + '"><div class="body"><div class="title">' +
-            escapeHtml(r.loanId || "No loan selected") + (warn ? ' <span class="chip amber">Date needed</span>' : "") +
+            escapeHtml(r.loanId || "No loan selected") + (r._check && r._check !== "OK" && r._check !== "Blank" ? ' <span class="chip amber">' + escapeHtml(r._check) + "</span>" : "") +
             "</div><div class=\"meta\">" + escapeHtml(r.dateISO || "No date") +
             (r.notes ? " · " + escapeHtml(String(r.notes).slice(0, 60)) : "") +
-            "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + money(r.amount) + "</div>" + svg("chev", 18) + "</button>";
+            "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + moneyCur(r.amount, r.currency) + "</div>" + svg("chev", 18) + "</button>";
         });
         html += "</div>" + showMoreBtn("receipts-g-" + k, page);
       });
@@ -2059,10 +2199,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       page.rows.forEach(function (r) {
         const warn = isNum(r.amount) && !r.dateISO;
         html += '<button class="row" data-act="edit-receipt" data-row="' + r.row + '"><div class="body"><div class="title">' +
-          escapeHtml(r.loanId || "No loan selected") + (warn ? ' <span class="chip amber">Date needed</span>' : "") +
+          escapeHtml(r.loanId || "No loan selected") + (r._check && r._check !== "OK" && r._check !== "Blank" ? ' <span class="chip amber">' + escapeHtml(r._check) + "</span>" : "") +
           "</div><div class=\"meta\">" + escapeHtml(r.dateISO || "No date") +
           (r.notes ? " · " + escapeHtml(String(r.notes).slice(0, 60)) : "") +
-          "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + money(r.amount) + "</div>" + svg("chev", 18) + "</button>";
+          "</div></div><div class=\"right " + moneyClass(r.amount) + '">' + moneyCur(r.amount, r.currency) + "</div>" + svg("chev", 18) + "</button>";
       });
       html += "</div>" + showMoreBtn("receipts", page);
     }
@@ -2087,9 +2227,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (sort === "amount-desc" || sort === "amount-asc") {
       const dir = sort === "amount-desc" ? -1 : 1;
       accounts.sort(function (a, b) {
-        const ua = isNum(a.balance) ? Number(a.balance) * fxRate(model, a.currency) : 0;
-        const ub = isNum(b.balance) ? Number(b.balance) * fxRate(model, b.currency) : 0;
-        return (ua - ub) * dir;
+        const ua = isNum(a.balance) ? Number(a.balance) * fxRateAccount(model, a.currency) : 0;
+        const ub = isNum(b.balance) ? Number(b.balance) * fxRateAccount(model, b.currency) : 0;
+        return ((ua || 0) - (ub || 0)) * dir;
       });
       properties.sort(function (a, b) {
         const ea = isNum(a.value) ? (Number(a.value) - (a.mortgage || 0)) * fxRate(model, a.currency) : 0;
@@ -2116,10 +2256,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const page = pageSlice(accounts, "accounts");
       html += '<div class="list-card">';
       page.rows.forEach(function (a) {
-        const usd = isNum(a.balance) ? Number(a.balance) * fxRate(model, a.currency) : null;
+        const usd = isNum(a.balance) ? Number(a.balance) * fxRateAccount(model, a.currency) : null;
+        const nonUsd = curCode(a.currency) !== "USD";
         html += '<button class="row" data-act="edit-account" data-row="' + a.row + '"><div class="body"><div class="title">' +
-          escapeHtml(a.name || a.type || "Account") + '</div><div class="meta">' + escapeHtml(a.type || "") +
-          (a.currency ? " · " + escapeHtml(a.currency) : "") + "</div></div><div class=\"right " + moneyClass(usd) + '">' + money(usd) + "</div>" + svg("chev", 18) + "</button>";
+          escapeHtml(a.name || a.type || "Account") + '</div><div class="meta">' + escapeHtml([a.type, nonUsd ? moneyCur(a.balance, a.currency) : ""].filter(Boolean).join(" · ")) +
+          "</div></div><div class=\"right " + moneyClass(usd) + '">' + money(usd) + "</div>" + svg("chev", 18) + "</button>";
       });
       html += "</div>" + showMoreBtn("accounts", page);
     }
@@ -2129,9 +2270,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const page = pageSlice(properties, "properties");
       html += '<div class="list-card">';
       page.rows.forEach(function (pr) {
-        const eq = isNum(pr.value) ? (Number(pr.value) - (pr.mortgage || 0)) * fxRate(model, pr.currency) : null;
+        const eqN = isNum(pr.value) ? (Number(pr.value) - (pr.mortgage || 0)) : null;
+        const eq = eqN == null ? null : eqN * fxRate(model, pr.currency);
         html += '<button class="row" data-act="edit-property" data-row="' + pr.row + '"><div class="body"><div class="title">' +
-          escapeHtml(pr.name || "Property") + '</div><div class="meta">' + (pr.include ? "Include in NW? Yes (memo)" : "Include in NW? No (memo)") +
+          escapeHtml(pr.name || "Property") + '</div><div class="meta">' + (curCode(pr.currency) !== "USD" ? escapeHtml(moneyCur(eqN, pr.currency)) + " · " : "") +
+          "Include (memo): " + (pr.include ? "Yes" : (pr.includeRaw ? escapeHtml(pr.includeRaw) : "blank")) +
           "</div></div><div class=\"right " + moneyClass(eq) + '">' + money(eq) + "</div>" + svg("chev", 18) + "</button>";
       });
       html += "</div>" + showMoreBtn("properties", page);
@@ -2148,6 +2291,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (state.moreScreen === "business") return renderBusiness(model);
     if (state.moreScreen === "history") return renderHistory(model, comp);
     if (state.moreScreen === "fx") return renderFx(model);
+    if (state.moreScreen === "types") return renderTypes(model);
     if (state.moreScreen === "guide") return renderGuide(model);
     let html = headerBar("More", "Menu") + '<div id="views" class="view" data-testid="screen-menu">';
     const items = [
@@ -2156,7 +2300,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       ["insurance", "Insurance", "Policies", model.insurance.length ? String(model.insurance.length) : ""],
       ["business", "Business", "Entities (IDs stay private)", model.business.length ? String(model.business.length) : ""],
       ["history", "History", "Net worth over time", ""],
-      ["fx", "Currencies", "Exchange rates", ""],
+      ["fx", "Currencies", "Exchange rates (FX sheet)", model.fx.length ? String(model.fx.length) : ""],
+      ["types", "Types", "Dropdown lists (Types sheet)", ""],
       ["guide", "Guide", "How this app works", ""]
     ];
     html += '<div class="list-card">';
@@ -2212,9 +2357,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const page = pageSlice(rows, "debts");
       html += '<div class="list-card">';
       page.rows.forEach(function (d) {
-        const usd = isNum(d.balance) ? Number(d.balance) * fxRate(model, d.currency) : 0;
+        const usd = (d.name && isNum(d.balance)) ? Number(d.balance) * fxRate(model, d.currency) : null;
         html += '<button class="row" data-act="edit-debt" data-row="' + d.row + '"><div class="body"><div class="title">' +
-          escapeHtml(d.name || "Debt") + '</div><div class="meta">' + escapeHtml([d.type, d.lender].filter(Boolean).join(" · ")) +
+          escapeHtml(d.name || "Debt") + '</div><div class="meta">' + escapeHtml([d.type, d.lender, curCode(d.currency) !== "USD" ? moneyCur(d.balance, d.currency) : "", d.name ? "" : "Name needed (Excel skips it)"].filter(Boolean).join(" · ")) +
           "</div></div><div class=\"right " + moneyClass(usd, true) + '">' + money(usd) + "</div>" + svg("chev", 18) + "</button>";
       });
       html += "</div>" + showMoreBtn("debts", page);
@@ -2226,9 +2371,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
   function renderCashflow(model, comp) {
     let html = backMore() + "<h1>Cash flow</h1></div><div id=\"views\" class=\"view\">";
-    html += '<div class="stat-row"><div class="stat"><div class="k">Income / yr</div><div class="v ' + moneyClass(comp.incomeYr) + '">' + money(comp.incomeYr) + "</div></div>";
-    html += '<div class="stat"><div class="k">Expenses / yr</div><div class="v ' + moneyClass(comp.expYr, true) + '">' + money(comp.expYr) + "</div></div></div>";
-    html += '<div class="stat" style="margin-bottom:12px"><div class="k">Open bills</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
+    html += '<div class="stat-row"><div class="stat"><div class="k">Income / yr (USD)</div><div class="v ' + moneyClass(comp.incomeYr) + '">' + money(comp.incomeYr) + "</div></div>";
+    html += '<div class="stat"><div class="k">Expenses / yr (USD)</div><div class="v ' + moneyClass(comp.expYr, true) + '">' + money(comp.expYr) + "</div></div></div>";
+    html += '<div class="stat" style="margin-bottom:12px"><div class="k">Open bills (USD)</div><div class="meta">Net plan ' + money(comp.incomeYr - comp.expYr) + '</div><div class="v ' + moneyClass(comp.openBills, true) + '">' + money(comp.openBills) + "</div></div>";
     const q = lq("cashflow").trim().toLowerCase();
     html += listToolbar("cashflow", { placeholder: "Search income, expenses, and bills" });
     [["income", "Income"], ["expenses", "Expenses"], ["bills", "Bills"]].forEach(function (pair) {
@@ -2242,8 +2387,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         const page = pageSlice(list, "cf-" + pair[0]);
         html += '<div class="list-card">';
         page.rows.forEach(function (r) {
+          const bills = pair[0] === "bills";
+          const native = bills ? (isNum(r.amount) ? Number(r.amount) : null) : (isNum(r.amount) && isNum(r.pays) ? Number(r.amount) * Number(r.pays) : null);
+          const usdV = native == null ? null : (bills && (r.paidISO || (r.paidRaw != null && r.paidRaw !== "")) ? null : native * fxRate(model, r.currency));
+          const per = bills ? (r.paidISO ? "Paid " + r.paidISO : (r.dueISO ? "Due " + r.dueISO : "")) : (isNum(r.amount) ? moneyCur(r.amount, r.currency) + " × " + (isNum(r.pays) ? r.pays : "?") + "/yr" : "");
+          const nat = bills && curCode(r.currency) !== "USD" && native != null ? moneyCur(native, r.currency) : "";
           html += '<button class="row" data-act="edit-cf" data-list="' + pair[0] + '" data-row="' + r.row + '"><div class="body"><div class="title">' +
-            escapeHtml(r.name || pair[1]) + '</div><div class="meta">' + escapeHtml(r.category || "") + "</div></div><div class=\"right\">" + money(r.amount) + "</div></button>";
+            escapeHtml(r.name || pair[1]) + '</div><div class="meta">' + escapeHtml([r.category, per, nat].filter(Boolean).join(" · ")) + "</div></div><div class=\"right\">" +
+            (bills && usdV == null && native != null ? "Paid" : money(usdV)) + "</div>" + svg("chev", 18) + "</button>";
         });
         html += "</div>" + showMoreBtn("cf-" + pair[0], page);
       }
@@ -2416,14 +2567,35 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
   }
 
   function renderFx(model) {
-    let html = backMore() + "<h1>FX</h1></div><div id=\"views\" class=\"view\">";
+    let html = backMore() + "<h1>Currencies</h1></div><div id=\"views\" class=\"view\">";
+    html += '<p class="help-line" style="text-align:left">Every amount is converted to USD with these rates, the same way the Excel FX sheet does. Tap a currency to change its rate.</p>';
     html += '<div class="list-card">';
     model.fx.forEach(function (r) {
-      const eff = fxRate(model, r.code);
-      html += '<button class="row" data-act="edit-fx" data-row="' + r.row + '"><div class="body"><div class="title">' +
-        escapeHtml(r.code) + '</div><div class="meta">1 ' + escapeHtml(r.code) + " = " + (isNum(eff) ? Number(eff).toPrecision(6) : "—") + " USD</div></div>" + svg("chev", 18) + "</button>";
+      const eff = fxEffective(r);
+      const usdPer = isNum(eff) && eff !== 0 ? 1 / eff : null;
+      html += '<button class="row" data-act="edit-fx" data-row="' + r.row + '" data-testid="fx-' + escapeHtml(r.code) + '"><div class="body"><div class="title">' +
+        escapeHtml(r.code) + '</div><div class="meta">' + (isNum(eff) ? (r.code.toUpperCase() === "USD" ? "Base currency · 1 USD = " + Number(eff).toPrecision(6) + " USD" : "1 USD = " + Number(usdPer.toPrecision(6)).toLocaleString("en-US", { maximumFractionDigits: 4 }) + " " + escapeHtml(r.code) + " · 1 " + escapeHtml(r.code) + " = $" + Number(eff).toPrecision(4)) : "No rate yet") +
+        '</div></div><span class="chip ' + (isNum(eff) ? "" : "amber") + '">' + escapeHtml(({ "From 1 USD =": "Typed", "Manual override": "Manual", "Pasted live": "Live", "Fallback (offline)": "Fallback" })[fxStatus(r)] || fxStatus(r)) + "</span>" + svg("chev", 18) + "</button>";
     });
-    html += "</div></div>";
+    html += "</div>";
+    const free = (model.fxRange ? model.fxRange.last - model.fxRange.first + 1 : 34) - model.fx.length;
+    if (free > 0) html += '<div class="sheet-actions"><button class="btn secondary" data-act="add-fx" data-testid="add-fx">Add currency</button></div>';
+    html += "</div>";
+    return html;
+  }
+
+  function renderTypes(model) {
+    let html = backMore() + "<h1>Types</h1></div><div id=\"views\" class=\"view\">";
+    html += '<p class="help-line" style="text-align:left">These lists feed the dropdowns, exactly like the Types sheet in Excel.</p>';
+    (model.typeCols || []).forEach(function (tc) {
+      html += '<div class="section-label">' + escapeHtml(tc.label) + " · " + tc.items.length + ' <button class="pill ghost" data-act="add-type" data-list="' + tc.col + '">Add</button></div>';
+      html += '<div class="list-card">';
+      tc.items.forEach(function (it) {
+        html += '<button class="row" data-act="edit-type" data-list="' + tc.col + '" data-row="' + it.row + '"><div class="body"><div class="title">' + escapeHtml(it.value) + "</div></div>" + svg("chev", 18) + "</button>";
+      });
+      html += "</div>";
+    });
+    html += "</div>";
     return html;
   }
 
@@ -2435,8 +2607,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       "<li>After you save, open the file in Excel so locked formulas (amount left, USD totals) recalculate.</li>" +
       "<li>Interest is charged monthly on the amount still owed (APR ÷ 12), interest first, for the as-of month in full. Unpaid interest never compounds and is not in net worth.</li>" +
       "<li>Net worth = accounts + amount left on loans + all property equity − debts, once every loan is set up and every payment has a date.</li>" +
+      "<li>Currencies: pick one on any account, property, debt, or cash-flow item. Amounts convert to USD with the rates in More → Currencies (same order as Excel FX). Loans and their payments stay USD, as Excel requires.</li>" +
       "<li>This app never sends your data to a server and does not show business identification numbers.</li>" +
-      "</ol></div></div>";
+      "</ol></div>";
+    if (model.guide && model.guide.length) {
+      html += '<details class="card"><summary>Workbook Guide sheet</summary>' +
+        model.guide.map(function (g) { return "<p>" + escapeHtml(g) + "</p>"; }).join("") + "</details>";
+    }
+    html += "</div>";
     return html;
   }
 
@@ -2450,8 +2628,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const v = val == null ? "" : val;
     let input;
     if (f.type === "select") {
-      input = '<select id="' + id + '" name="' + f.key + '">' + (f.blank !== false ? '<option value=""></option>' : "") +
-        f.options.map(function (o) { return '<option value="' + escapeHtml(o) + '"' + (String(o) === String(v) ? " selected" : "") + ">" + escapeHtml(o) + "</option>"; }).join("") +
+      let options = (f.options || []).slice();
+      if (v !== "" && !options.some(function (o) { return String(o) === String(v); })) options.push(String(v));
+      input = '<select id="' + id + '" name="' + f.key + '">' + (f.blank !== false ? '<option value="">' + escapeHtml(f.blankLabel || "") + '</option>' : "") +
+        options.map(function (o) { return '<option value="' + escapeHtml(o) + '"' + (String(o) === String(v) ? " selected" : "") + ">" + escapeHtml(o) + "</option>"; }).join("") +
         "</select>";
     } else if (f.type === "textarea") {
       input = '<textarea id="' + id + '" name="' + f.key + '">' + escapeHtml(v) + "</textarea>";
@@ -2462,7 +2642,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         (f.placeholder ? ' placeholder="' + escapeHtml(f.placeholder) + '"' : "") + ' autocomplete="off">';
     }
     return '<div class="field" data-field="' + f.key + '"><label for="' + id + '">' + escapeHtml(f.label) + (f.required ? " *" : "") + "</label>" + input +
-      (f.hint ? '<div class="hint">' + escapeHtml(f.hint) + "</div>" : "") + '<div class="err" hidden></div></div>';
+      (f.hint ? '<div class="hint">' + escapeHtml(f.hint) + "</div>" : "") +
+      (f.fxHint ? '<div class="hint fx-hint" data-role="fxhint"></div>' : "") + '<div class="err" hidden></div></div>';
   }
   function formSheet(title, fields, values, opts) {
     opts = opts || {};
@@ -2492,6 +2673,67 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (s === "" || s == null) return null;
     const n = Number(String(s).replace(/[$,\s]/g, ""));
     return isFinite(n) ? n : NaN;
+  }
+
+  /* Dropdown choices read from the workbook's own Data Validation lists. */
+  function dvFor(sheetName, col, row) {
+    const all = (state.parsed && state.parsed._dv) || {};
+    const key = Object.keys(all).find(function (k) { return k.toLowerCase() === String(sheetName || "").toLowerCase(); });
+    const list = key ? all[key] : [];
+    const c = colNum(col);
+    return list.find(function (d) {
+      return d.ranges.some(function (r) { return c >= r.c1 && c <= r.c2 && row >= r.r1 && row <= r.r2; });
+    }) || null;
+  }
+  function dvOptions(model, sheetName, col, row, fallback) {
+    const d = sheetName && col && row ? dvFor(sheetName, col, row) : null;
+    if (!d) return fallback || [];
+    const src = d.src;
+    if (src.list) return src.list.slice();
+    const sn = String(src.sheet).toLowerCase();
+    if (model.fxRange && sn === String(model.fxRange.sheet).toLowerCase() && src.col === "A") {
+      return model.fx.filter(function (x) { return x.row >= src.r1 && x.row <= src.r2; }).map(function (x) { return String(x.code); });
+    }
+    if (model.typesSheet && sn === String(model.typesSheet).toLowerCase()) {
+      const tc = (model.typeCols || []).find(function (x) { return x.col === src.col; });
+      if (tc) return tc.items.filter(function (x) { return x.row >= src.r1 && x.row <= src.r2; }).map(function (x) { return x.value; });
+    }
+    const out = [];
+    const raw = state.raw && Object.keys(state.raw).find(function (k) { return k.toLowerCase() === sn; });
+    for (let r = src.r1; r <= src.r2; r++) {
+      const cc = raw ? state.raw[raw].cells[src.col + r] : null;
+      if (cc && cc.v != null && String(cc.v).trim() !== "") out.push(String(cc.v));
+    }
+    return out;
+  }
+  function fxCodes(model) { return model.fx.map(function (x) { return x.code; }); }
+  function curField(model, sheet, col, row, extra) {
+    return Object.assign({ key: "currency", label: "Currency", type: "select", options: dvOptions(model, sheet, col, row, fxCodes(model)),
+      blankLabel: "(blank = USD)", col: col, kind: "s", fxHint: true }, extra || {});
+  }
+  function updateFxHint(form) {
+    const box = form && form.querySelector('[data-role="fxhint"]');
+    if (!box) return;
+    const model = liveModel();
+    const cur = (form.querySelector('[name="currency"]') || {}).value || "";
+    const st = state.sheet || {};
+    const g = function (k) { const el = form.querySelector('[name="' + k + '"]'); return el ? parseMoney(el.value) : null; };
+    let amt = null;
+    if (st.gkind === "property") { const v = g("value"); amt = v == null || Number.isNaN(v) ? null : v - (g("mortgage") || 0); }
+    else amt = g("balance") != null ? g("balance") : g("amount") != null ? g("amount") : g("opening");
+    const code = curCode(cur);
+    const rate = st.gkind === "account" ? fxRateAccount(model, cur) : fxRate(model, cur);
+    let txt = "";
+    if (code !== "USD" || !Number.isFinite(rate) || rate !== 1) {
+      const row = fxRow(model, code);
+      if (!row && code !== "USD") txt = code + " is not on the FX sheet — Excel counts it 1:1 as USD.";
+      else if (!Number.isFinite(rate)) txt = "No rate for " + code + " on the FX sheet yet — Excel totals show an error until you add one (More → Currencies).";
+      else txt = "1 " + code + " = " + Number(rate).toPrecision(6) + " USD" + (amt != null && !Number.isNaN(amt) ? " · " + moneyCur(amt, code) + " ≈ " + money(amt * rate) : "");
+    }
+    if (st.kind === "loan" && code !== "USD") txt = "Excel's interest sheet works in USD only. With " + code + " this loan shows “Terms needed: USD only” and Home waits — exactly like Excel.";
+    if (st.kind === "receipt" && code !== "USD") txt = "Excel needs USD payments that match the loan. " + code + " shows “USD receipt required” and Home waits — exactly like Excel.";
+    box.textContent = txt;
+    box.hidden = !txt;
   }
 
   function rawCell(sheetName, ref) {
@@ -2542,11 +2784,12 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
 
   /* Receipt */
   function receiptFields(model) {
+    const rr = model.receiptRange || {};
     return [
       { key: "loanId", label: "Loan", type: "select", options: loanIds(model), required: true },
       { key: "date", label: "Date received", type: "date", required: true },
       { key: "amount", label: "Amount", type: "money", required: true, placeholder: "0.00" },
-      { key: "currency", label: "Currency", type: "select", options: ["USD"], blank: false, hint: "Loans are USD only." },
+      curField(model, rr.sheet, rr.cols && rr.cols.currency, rr.first, { blankLabel: "" }),
       { key: "notes", label: "Note", type: "text" }
     ];
   }
@@ -2555,13 +2798,14 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const existing = row ? model.receipts.find(function (r) { return r.row === row; }) : null;
     const vals = existing ? {
       loanId: existing.loanId, date: existing.dateISO || "", amount: existing.amount != null ? existing.amount : "",
-      currency: existing.currency || "USD", notes: existing.notes
+      currency: existing.currency || "", notes: existing.notes
     } : { loanId: loanIds(model)[0] || "", date: todayISO(), currency: "USD" };
     state.sheet = { kind: "receipt", row: row || null, fields: receiptFields(model), confirmFuture: false };
     openSheet(formSheet(existing ? "Edit payment" : "Add payment received", state.sheet.fields, vals, {
       form: "receipt", submit: existing ? "Save changes" : "Add payment",
       intro: existing && !existing.dateISO ? "This receipt has no date. Enter the actual date it was received." : ""
     }));
+    updateFxHint(document.querySelector("#sheet form"));
   }
   function submitReceipt(form) {
     const model = liveModel();
@@ -2597,28 +2841,33 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       if (!prev || prev.loanId !== f.loanId) writes.push(wText(sheet, c.id + row, f.loanId));
       if (!prev || prev.dateISO !== f.date) writes.push(wDate(sheet, c.date + row, f.date));
       if (!prev || prev.amount !== amt) writes.push(wNum(sheet, c.amount + row, amt));
-      if (!prev || (prev.currency || "USD") !== (f.currency || "USD")) writes.push(wText(sheet, c.currency + row, f.currency || "USD"));
+      if (!prev || (prev.currency || "") !== (f.currency || "")) writes.push(wText(sheet, c.currency + row, f.currency || ""));
       if ((!prev && f.notes) || (prev && (prev.notes || "") !== f.notes)) writes.push(wText(sheet, c.notes + row, f.notes));
       if (!writes.length) { closeSheet(); toast("No changes"); return; }
       const change = state.sheet.row
-        ? { entity: "receipt", row: row, sheet: sheet, loanId: f.loanId, dateISO: f.date, amount: amt, currency: f.currency || "USD", notes: f.notes }
-        : { entity: "receipt", action: "add", row: row, sheet: sheet, loanId: f.loanId, dateISO: f.date, amount: amt, currency: f.currency || "USD", notes: f.notes };
+        ? { entity: "receipt", row: row, sheet: sheet, loanId: f.loanId, dateISO: f.date, amount: amt, currency: f.currency || "", notes: f.notes }
+        : { entity: "receipt", action: "add", row: row, sheet: sheet, loanId: f.loanId, dateISO: f.date, amount: amt, currency: f.currency || "", notes: f.notes };
       pushOp((state.sheet.row ? "Updated payment " : "Payment ") + money(amt) + " · " + f.loanId + " (row " + row + ")", [change], writes);
     } catch (e) { showErrors(form, { amount: e.message }); }
   }
 
   /* Loan */
-  const LOAN_FIELDS = [
+  function loanFields(model, row) {
+    const sheet = model.loans[0] && model.loans[0].sheet;
+    const c = (model.loans[0] && model.loans[0].cols) || {};
+    return [
     { key: "id", label: "Loan ID", type: "text", required: true },
     { key: "borrower", label: "Borrower", type: "text" },
-    { key: "purpose", label: "Purpose", type: "text" },
-    { key: "currency", label: "Currency", type: "select", options: ["USD"], blank: false },
+    { key: "purpose", label: "Purpose", type: "select", options: dvOptions(model, sheet, c.purpose || "C", row || 6, model.types["loans / purpose"] || []) },
+    curField(model, sheet, c.currency || "D", row || 6, { blankLabel: "" }),
     { key: "opening", label: "Opening principal", type: "money", required: true },
     { key: "apr", label: "APR %", type: "percent", required: true, hint: "Type 4 for 4%. Explicit 0 is allowed; blank is not zero." },
     { key: "payments", label: "Number of payments", type: "number", required: true, hint: "1–360" },
     { key: "freq", label: "Frequency", type: "select", options: ["Monthly"], blank: false },
-    { key: "start", label: "First payment month (start date)", type: "date", required: true }
+    { key: "start", label: "First payment month (start date)", type: "date", required: true },
+    { key: "notes", label: "Notes", type: "text" }
   ];
+  }
   function openLoanForm(row) {
     const model = liveModel();
     let ln = row ? model.loans.find(function (l) { return l.row === row; }) : null;
@@ -2627,18 +2876,21 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const vals = {
       id: ln.id, borrower: ln.borrower, purpose: ln.purpose, currency: ln.currency || "USD",
       opening: ln.opening != null ? ln.opening : "", apr: isNum(ln.apr) ? +(Number(ln.apr) * 100).toFixed(6) : "",
-      payments: ln.payments != null ? ln.payments : "", freq: ln.freq || "Monthly", start: ln.startISO || ""
+      payments: ln.payments != null ? ln.payments : "", freq: ln.freq || "Monthly", start: ln.startISO || "", notes: ln.notes || ""
     };
+    if (!ln.id) vals.currency = "USD";
+    const LOAN_FIELDS = loanFields(model, ln.row);
     state.sheet = { kind: "loan", row: ln.row, fields: LOAN_FIELDS, isNew: !ln.id };
     const comp = computeAll(model);
     const r = comp.loans.find(function (x) { return x.id && x.id === ln.id; });
     const intro = r && !r.ready && r.issues && r.issues.length ? "Needs: " + r.issues.join(", ") : "";
     openSheet(formSheet(ln.id ? "Edit loan " + ln.id : "Add loan", LOAN_FIELDS, vals, { form: "loan", submit: ln.id ? "Save loan" : "Add loan", intro: intro }) +
       (ln.id ? '<div class="sheet-body"><button class="btn secondary" data-act="add-receipt-for" data-id="' + escapeHtml(ln.id) + '">Add payment for ' + escapeHtml(ln.id) + "</button></div>" : ""));
+    updateFxHint(document.querySelector("#sheet form"));
   }
   function submitLoan(form) {
     const model = liveModel();
-    const f = readForm(form, LOAN_FIELDS);
+    const f = readForm(form, state.sheet.fields);
     const errs = {};
     const ln = model.loans.find(function (l) { return l.row === state.sheet.row; });
     if (!f.id) errs.id = "Loan ID is required.";
@@ -2671,16 +2923,17 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       if (!same(ln.id, f.id)) writes.push(wText(sheet, c.id + r, f.id));
       if (!same(ln.borrower, f.borrower)) writes.push(wText(sheet, c.borrower + r, f.borrower));
       if (!same(ln.purpose, f.purpose)) writes.push(wText(sheet, c.purpose + r, f.purpose));
-      if (!same(ln.currency, f.currency || "USD")) writes.push(wText(sheet, c.currency + r, f.currency || "USD"));
+      if (!same(ln.currency, f.currency)) writes.push(wText(sheet, c.currency + r, f.currency));
       if (!same(ln.opening, op)) writes.push(wNum(sheet, c.opening + r, op));
       if (!same(ln.apr, apr)) writes.push(wNum(sheet, c.apr + r, apr));
       if (!same(ln.payments, n)) writes.push(wNum(sheet, c.payments + r, n));
       if (!same(ln.freq, f.freq || "Monthly")) writes.push(wText(sheet, c.freq + r, f.freq || "Monthly"));
       if (!same(ln.startISO, f.start)) writes.push(wDate(sheet, c.start + r, f.start));
+      if (!same(ln.notes, f.notes)) writes.push(wText(sheet, (c.notes || "L") + r, f.notes));
       if (!writes.length) { closeSheet(); toast("No changes"); return; }
       pushOp((ln.id ? "Updated loan " : "Added loan ") + f.id, [{
-        entity: "loan", row: r, id: f.id, borrower: f.borrower, purpose: f.purpose, currency: f.currency || "USD",
-        opening: op, apr: apr, payments: n, freq: f.freq || "Monthly", startISO: f.start
+        entity: "loan", row: r, id: f.id, borrower: f.borrower, purpose: f.purpose, currency: f.currency,
+        opening: op, apr: apr, payments: n, freq: f.freq || "Monthly", startISO: f.start, notes: f.notes
       }], writes);
     } catch (e) { showErrors(form, { id: e.message }); }
   }
@@ -2693,9 +2946,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         title: "Account", range: rg, list: model.accounts, entity: "account",
         fields: [
           { key: "name", label: "Name", type: "text", col: rg.cols.name, kind: "s" },
-          { key: "type", label: "Type", type: "select", options: model.types.accounts || [], col: rg.cols.type, kind: "s" },
+          { key: "type", label: "Type", type: "select", options: dvOptions(model, rg.sheet, rg.cols.type, rg.first, model.types.accounts || []), col: rg.cols.type, kind: "s" },
           { key: "balance", label: "Balance", type: "money", required: true, col: rg.cols.balance, kind: "n" },
-          { key: "currency", label: "Currency", type: "select", options: model.fx.map(function (x) { return x.code; }), col: rg.cols.currency, kind: "s" },
+          curField(model, rg.sheet, rg.cols.currency, rg.first),
           { key: "updatedISO", label: "Updated", type: "date", col: rg.cols.updated, kind: "d" },
           { key: "notes", label: "Notes", type: "text", col: rg.cols.notes, kind: "s" }
         ],
@@ -2712,8 +2965,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
           { key: "owner", label: "Owner", type: "text", col: rg.cols.owner, kind: "s" },
           { key: "value", label: "Full value", type: "money", required: true, col: rg.cols.value, kind: "n" },
           { key: "mortgage", label: "Mortgage", type: "money", col: rg.cols.mortgage, kind: "n" },
-          { key: "currency", label: "Currency", type: "select", options: model.fx.map(function (x) { return x.code; }), col: rg.cols.currency, kind: "s" },
-          { key: "includeRaw", label: "Include in net worth?", type: "select", options: ["Yes", "No"], blank: false, col: rg.cols.include, kind: "s" },
+          curField(model, rg.sheet, rg.cols.currency, rg.first),
+          { key: "includeRaw", label: "Include in net worth? (memo)", type: "select", options: dvOptions(model, rg.sheet, rg.cols.include, rg.first, ["Yes", "No"]), col: rg.cols.include, kind: "s",
+            hint: "Memo line only. Net worth uses all property equity, like Excel Home." },
+          { key: "updatedISO", label: "Updated", type: "date", col: rg.cols.updated, kind: "d" },
           { key: "notes", label: "Notes", type: "text", col: rg.cols.notes, kind: "s" }
         ]
       };
@@ -2724,10 +2979,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         title: "Debt", range: rg, list: model.debts, entity: "debt",
         fields: [
           { key: "name", label: "Name", type: "text", required: true, col: rg.cols.name, kind: "s" },
-          { key: "type", label: "Type", type: "select", options: model.types.debts || [], col: rg.cols.type, kind: "s" },
+          { key: "type", label: "Type", type: "select", options: dvOptions(model, rg.sheet, rg.cols.type, rg.first, model.types.debts || []), col: rg.cols.type, kind: "s" },
           { key: "lender", label: "Lender", type: "text", col: rg.cols.lender, kind: "s" },
           { key: "balance", label: "Balance owed", type: "money", required: true, col: rg.cols.balance, kind: "n" },
-          { key: "currency", label: "Currency", type: "select", options: model.fx.map(function (x) { return x.code; }), col: rg.cols.currency, kind: "s" },
+          curField(model, rg.sheet, rg.cols.currency, rg.first),
           { key: "updatedISO", label: "Updated", type: "date", col: rg.cols.updated, kind: "d" },
           { key: "notes", label: "Notes", type: "text", col: rg.cols.notes, kind: "s" }
         ]
@@ -2738,7 +2993,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       return {
         title: "Policy", range: rg, list: model.insurance, entity: "insurance",
         fields: [
-          { key: "type", label: "Type", type: "select", options: model.types.insurance || [], col: "A", kind: "s", required: true },
+          { key: "type", label: "Type", type: "select", options: dvOptions(model, rg.sheet, "A", rg.first, model.types.insurance || []), col: "A", kind: "s", required: true },
           { key: "insurer", label: "Insurer", type: "text", col: "B", kind: "s" },
           { key: "policy", label: "Policy #", type: "text", col: "C", kind: "s" },
           { key: "premium", label: "Annual premium", type: "money", col: "D", kind: "n" },
@@ -2757,14 +3012,19 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         fields: [
           { key: "name", label: "Business / legal name", type: "text", required: true, col: "A", kind: "s" },
           { key: "dba", label: "DBA", type: "text", col: "B", kind: "s" },
-          { key: "type", label: "Entity type", type: "text", col: "D", kind: "s" },
+          { key: "type", label: "Entity type", type: "select", options: dvOptions(model, rg.sheet, "D", rg.first, []), col: "D", kind: "s" },
           { key: "own", label: "% you own", type: "percent", col: "E", kind: "pct" },
-          { key: "role", label: "Your role", type: "text", col: "F", kind: "s" },
+          { key: "role", label: "Your role", type: "select", options: dvOptions(model, rg.sheet, "F", rg.first, []), col: "F", kind: "s" },
+          { key: "person", label: "Registered person name", type: "text", col: "G", kind: "s" },
+          { key: "title", label: "Registered person title", type: "text", col: "H", kind: "s" },
           { key: "phone", label: "Phone", type: "text", col: "I", kind: "s" },
           { key: "email", label: "Email", type: "email", col: "J", kind: "s" },
           { key: "state", label: "Formation state", type: "text", col: "K", kind: "s" },
           { key: "formedISO", label: "Formation date", type: "date", col: "L", kind: "d" },
-          { key: "city", label: "City", type: "text", col: "N", kind: "s" }
+          { key: "address", label: "Address", type: "text", col: "M", kind: "s" },
+          { key: "city", label: "City", type: "text", col: "N", kind: "s" },
+          { key: "st", label: "State", type: "text", col: "O", kind: "s" },
+          { key: "zip", label: "ZIP", type: "text", col: "P", kind: "s" }
         ],
         intro: "Identification numbers are edited in Excel only."
       };
@@ -2787,26 +3047,38 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       const bills = list === "bills";
       const fields = [
         { key: "name", label: bills ? "Bill" : (list === "income" ? "Source" : "Expense"), type: "text", required: true, col: "A", kind: "s" },
-        { key: "category", label: "Category", type: "text", col: "B", kind: "s" },
+        { key: "category", label: "Category", type: "select", options: dvOptions(model, rg.sheet, "B", rg.first, []), col: "B", kind: "s" },
         { key: "amount", label: bills ? "Amount" : "Per payment", type: "money", required: true, col: "C", kind: "n" }
       ];
       if (bills) {
         fields.push({ key: "dueISO", label: "Due date", type: "date", col: "D", kind: "d" });
         fields.push({ key: "paidISO", label: "Paid date", type: "date", col: "E", kind: "d" });
       } else {
-        fields.push({ key: "pays", label: "Payments per year", type: "number", col: "D", kind: "n" });
+        fields.push({ key: "pays", label: "Payments per year", type: "number", col: "D", kind: "n", hint: "Excel's Yearly = Per payment × Payments per year (blank leaves it out)." });
       }
-      fields.push({ key: "currency", label: "Currency", type: "select", options: model.fx.map(function (x) { return x.code; }), col: "F", kind: "s" });
+      fields.push(curField(model, rg.sheet, "F", rg.first));
       fields.push({ key: "notes", label: "Notes", type: "text", col: "H", kind: "s" });
       return { title: bills ? "Bill" : (list === "income" ? "Income" : "Expense"), range: rg, list: model.cashflow[list], entity: "cashflow", listName: list, fields: fields };
     }
     if (kind === "fx") {
+      const rg = model.fxRange || { sheet: model.fx[0] && model.fx[0].sheet, first: 7, last: 40 };
       return {
-        title: "Rate", range: { sheet: model.fx[0] && model.fx[0].sheet }, list: model.fx, entity: "fx", noAdd: true,
+        title: "Currency", range: rg, list: model.fx, entity: "fx",
         fields: [
-          { key: "manual", label: "Manual override (1 unit = USD)", type: "number", col: "C", kind: "n" },
-          { key: "perUsd", label: "1 USD = (units)", type: "number", col: "F", kind: "n", hint: "Example: INR 95.80" }
-        ]
+          { key: "code", label: "Currency code", type: "text", required: true, col: "A", kind: "s", placeholder: "e.g. INR", upper: true },
+          { key: "perUsd", label: "1 USD = (units)", type: "number", col: "F", kind: "n", hint: "Easiest: type how many units 1 USD buys, e.g. INR 95.80. Used first." },
+          { key: "manual", label: "Manual override (1 unit = USD)", type: "number", col: "C", kind: "n", hint: "Used when “1 USD =” is blank." },
+          { key: "live", label: "Live rate (paste, 1 unit = USD)", type: "number", col: "B", kind: "n", hint: "Used when both above are blank. Fallback column stays in Excel." }
+        ],
+        intro: "Same order as Excel FX: 1 USD = → Manual → Live → Fallback."
+      };
+    }
+    if (kind === "types") {
+      const tc = (model.typeCols || []).find(function (x) { return x.col === list; });
+      if (!tc) return null;
+      return {
+        title: tc.label + " type", range: { sheet: model.typesSheet, first: 5, last: 79 }, list: tc.items, entity: "types", listName: list,
+        fields: [{ key: "value", label: "Name", type: "text", col: list, kind: "s", hint: "Clear the name to remove it from the dropdown." }]
       };
     }
     return null;
@@ -2831,9 +3103,11 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     });
     if (!item) {
       spec.fields.forEach(function (f) { if (f.key === "currency") vals.currency = "USD"; if (f.key === "includeRaw") vals.includeRaw = "Yes"; });
+      if (kind === "cashflow" && list !== "bills") vals.pays = 12;
     }
     state.sheet = { kind: "generic", gkind: kind, list: list, row: targetRow, isNew: !item, fields: spec.fields };
     openSheet(formSheet((item ? "Edit " : "Add ") + spec.title.toLowerCase(), spec.fields, vals, { form: "generic", submit: item ? "Save" : "Add", intro: spec.intro || "" }));
+    updateFxHint(document.querySelector("#sheet form"));
   }
 
   function submitGeneric(form) {
@@ -2859,8 +3133,12 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         } else if (fd.kind === "d") {
           val = raw || null;
         } else {
-          val = raw;
+          val = fd.upper ? raw.toUpperCase() : raw;
         }
+        if (spec.entity === "fx" && fd.key === "code" && val && spec.list.some(function (x) { return x.row !== st.row && String(x.code).toUpperCase() === val; })) {
+          errs.code = val + " is already on the FX sheet."; return;
+        }
+        if (spec.entity === "fx" && fd.key === "perUsd" && val != null && val < 0) { errs.perUsd = "Cannot be negative."; return; }
         const before = item ? item[fd.key] : (fd.kind === "s" ? "" : null);
         const same = (before == null || before === "") && (val == null || val === "") ? true :
           (fd.kind === "n" || fd.kind === "pct") ? (isNum(before) && isNum(val) && Math.abs(Number(before) - Number(val)) < 1e-9) :
@@ -2877,7 +3155,7 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     } catch (e) { errs[spec.fields[0].key] = e.message; }
     if (Object.keys(errs).length) { showErrors(form, errs); return; }
     if (!writes.length) { closeSheet(); toast("No changes"); return; }
-    if (spec.entity === "property") fields.include = String(fields.includeRaw || "Yes").toLowerCase() !== "no";
+    if (spec.entity === "property") fields.include = String(fields.includeRaw || "").trim().toLowerCase() === "yes";
     if (spec.entity === "property" && fields.mortgage == null) fields.mortgage = 0;
     if (spec.entity === "history" && !isNum(fields.nw) && (isNum(fields.assets) || isNum(fields.debts))) {
       fields.nw = Number(fields.assets || 0) - Number(fields.debts || 0);
@@ -2889,7 +3167,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     } else {
       change = { entity: spec.entity, action: "edit", row: st.row, fields: fields, list: spec.listName };
     }
-    const label = (st.isNew ? "Added " : "Updated ") + spec.title.toLowerCase() + (fields.name ? " " + fields.name : "") + " (row " + st.row + ")";
+    const nm = fields.name || fields.code || fields.value || "";
+    const label = (st.isNew ? "Added " : "Updated ") + spec.title.toLowerCase() + (nm ? " " + nm : "") + " (row " + st.row + ")";
     pushOp(label, [change], writes);
   }
 
@@ -3063,6 +3342,9 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
         case "add-cf": openGeneric("cashflow", null, list); break;
         case "edit-cf": openGeneric("cashflow", row, list); break;
         case "edit-fx": openGeneric("fx", row); break;
+        case "add-fx": openGeneric("fx", null); break;
+        case "edit-type": openGeneric("types", row, list); break;
+        case "add-type": openGeneric("types", null, list); break;
         case "edit-asof": openAsOf(); break;
         case "goto-assets": state.view = "assets"; render(); break;
         case "goto-debts": state.view = "more"; state.moreScreen = "debts"; render(); break;
@@ -3095,6 +3377,10 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     if (ov) ov.onclick = closeSheet;
     const sheetEl = $("#sheet");
     if (sheetEl) {
+      sheetEl.oninput = sheetEl.onchange = function (ev) {
+        const form = ev.target && ev.target.closest && ev.target.closest("form");
+        if (form) updateFxHint(form);
+      };
       sheetEl.onsubmit = function (ev) {
         ev.preventDefault();
         const form = ev.target;
