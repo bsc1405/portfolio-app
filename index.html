@@ -2682,7 +2682,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
       (opts.intro ? '<div class="banner info">' + escapeHtml(opts.intro) + "</div>" : "") +
       fields.map(function (f) { return fieldHtml(f, values ? values[f.key] : ""); }).join("") +
       '<div class="banner amber" data-role="warn" hidden></div>' +
-      '<div class="sheet-actions"><button type="submit" class="btn" data-testid="form-save">' + escapeHtml(opts.submit || "Save") + "</button></div></form>";
+      '<div class="sheet-actions"><button type="submit" class="btn" data-testid="form-save">' + escapeHtml(opts.submit || "Save") + "</button></div>" +
+      (opts.after || "") + "</form>";
   }
   function readForm(form, fields) {
     const out = {};
@@ -2944,8 +2945,8 @@ break;case"<bookViews":;case"<bookViews>":;case"</bookViews>":break;case"<workbo
     const comp = computeAll(model);
     const r = comp.loans.find(function (x) { return x.id && x.id === ln.id; });
     const intro = r && !r.ready && r.issues && r.issues.length ? "Needs: " + r.issues.join(", ") : "";
-    openSheet(formSheet(ln.id ? "Edit loan " + ln.id : "Add loan", LOAN_FIELDS, vals, { form: "loan", submit: ln.id ? "Save loan" : "Add loan", intro: intro }) +
-      (ln.id ? '<div class="sheet-body"><button class="btn secondary" data-act="add-receipt-for" data-id="' + escapeHtml(ln.id) + '">Add receipt for ' + escapeHtml(ln.id) + "</button></div>" : ""));
+    openSheet(formSheet(ln.id ? "Edit loan " + ln.id : "Add loan", LOAN_FIELDS, vals, { form: "loan", submit: ln.id ? "Save loan" : "Add loan", intro: intro,
+      after: ln.id ? '<div class="sheet-actions form-extra"><button type="button" class="btn secondary" data-act="add-receipt-for" data-testid="add-receipt-for" data-id="' + escapeHtml(ln.id) + '">Add receipt for ' + escapeHtml(ln.id) + "</button></div>" : "" }));
     updateFxHint(document.querySelector("#sheet form"));
   }
   function submitLoan(form) {
